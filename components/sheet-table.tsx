@@ -1,0 +1,145 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { SheetRow } from "@/lib/types";
+
+interface SheetTableProps {
+  rows: SheetRow[];
+  processingRowIndex?: number;
+  justFilledRowIndex?: number;
+  failedRowIndices?: Set<number>;
+}
+
+const COLUMNS = [
+  { key: "rowIndex", label: "#", width: "w-12" },
+  { key: "fullAddress", label: "Full Address", width: "min-w-[180px]" },
+  { key: "houseNumber", label: "House #", width: "w-24" },
+  { key: "street", label: "Street", width: "min-w-[140px]" },
+  { key: "borough", label: "Borough", width: "w-24" },
+  { key: "ownerName", label: "Owner Name", width: "min-w-[160px]" },
+  { key: "billingNameAndAddress", label: "Billing Info", width: "min-w-[200px]" },
+];
+
+export default function SheetTable({
+  rows,
+  processingRowIndex,
+  justFilledRowIndex,
+  failedRowIndices,
+}: SheetTableProps) {
+  const processingRef = useRef<HTMLTableRowElement>(null);
+  const [animatingRow, setAnimatingRow] = useState<number | null>(null);
+
+  // Auto-scroll to processing row
+  useEffect(() => {
+    if (processingRef.current) {
+      processingRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [processingRowIndex]);
+
+  // Trigger fill animation
+  useEffect(() => {
+    if (justFilledRowIndex) {
+      setAnimatingRow(justFilledRowIndex);
+      const timer = setTimeout(() => setAnimatingRow(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [justFilledRowIndex]);
+
+  function getRowClass(row: SheetRow) {
+    if (row.rowIndex === processingRowIndex) return "row-processing";
+    if (row.rowIndex === animatingRow) return "row-just-filled";
+    if (failedRowIndices?.has(row.rowIndex)) return "bg-row-error";
+    return "";
+  }
+
+  function getStatusIndicator(row: SheetRow) {
+    if (row.rowIndex === processingRowIndex) {
+      return (
+        <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+      );
+    }
+    if (failedRowIndices?.has(row.rowIndex)) {
+      return <div className="w-2 h-2 rounded-full bg-danger" />;
+    }
+    if (row.ownerName || row.billingNameAndAddress) {
+      return <div className="w-2 h-2 rounded-full bg-green" />;
+    }
+    return <div className="w-2 h-2 rounded-full bg-dim/40" />;
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="bg-surface border border-border rounded-lg p-12 text-center">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" className="text-dim mx-auto mb-3">
+          <path d="M9 17H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-4m-6 0v4m0-4h6m-6 4h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <p className="text-secondary text-sm">No rows found in this sheet</p>
+        <p className="text-muted text-xs mt-1">Add addresses to your Google Sheet to get started</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-raised border-b border-border">
+              <th className="w-8 px-3 py-2.5" />
+              {COLUMNS.map((col) => (
+                <th
+                  key={col.key}
+                  className={`${col.width} px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted whitespace-nowrap`}
+                >
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((row) => (
+              <tr
+                key={row.rowIndex}
+                ref={row.rowIndex === processingRowIndex ? processingRef : undefined}
+                className={`${getRowClass(row)} hover:bg-raised/50 transition-colors duration-150`}
+              >
+                <td className="px-3 py-2 text-center">
+                  {getStatusIndicator(row)}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs text-muted">
+                  {row.rowIndex - 1}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs text-foreground truncate max-w-[200px]">
+                  {row.fullAddress || <span className="text-dim">--</span>}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs text-foreground">
+                  {row.houseNumber || <span className="text-dim">--</span>}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs text-foreground truncate max-w-[160px]">
+                  {row.street || <span className="text-dim">--</span>}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs text-foreground">
+                  {row.borough || <span className="text-dim">--</span>}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs truncate max-w-[180px]">
+                  {row.ownerName ? (
+                    <span className="text-green font-medium">{row.ownerName}</span>
+                  ) : (
+                    <span className="text-dim italic">pending</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs truncate max-w-[220px]">
+                  {row.billingNameAndAddress ? (
+                    <span className="text-green font-medium">{row.billingNameAndAddress}</span>
+                  ) : (
+                    <span className="text-dim italic">pending</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

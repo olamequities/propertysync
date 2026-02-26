@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /mnt/d/Robots/Clients/flow/olam/olam-app/app/api/sync/[jobId]/route.ts /mnt/d/Robots/Clients/flow/olam/olam-app/lib/scraper.ts)",
+      "Bash(npx next build 2>&1 | tail -40)",
+      "Bash(ls -la /mnt/d/Robots/Clients/flow/olam/olam-app/app/api/sheet/rows/ && ls -la /mnt/d/Robots/Clients/flow/olam/olam-app/app/api/sync/\\\\[jobId\\\\]/)",
+      "Bash(npx next build 2>&1 | tail -30)",
+      "Bash(pkill -f \"next\" 2>/dev/null; pkill -f \"node.*next\" 2>/dev/null; echo \"done\")",
+      "Bash(lsof -ti:3000 2>/dev/null | xargs kill -9 2>/dev/null; echo \"done\")",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")"
+    ]
+  }
+}

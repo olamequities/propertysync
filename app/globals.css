@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Outfit", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Atlassian-inspired light palette */
+  --color-bg: #fafbfc;
+  --color-surface: #ffffff;
+  --color-raised: #f4f5f7;
+  --color-card: #ffffff;
+  --color-card-hover: #fafbfc;
+
+  --color-border: #dfe1e6;
+  --color-border-hover: #c1c7d0;
+  --color-border-active: #4c9aff;
+
+  --color-foreground: #172b4d;
+  --color-secondary: #5e6c84;
+  --color-muted: #7a869a;
+  --color-dim: #b3bac5;
+
+  /* Blue primary like Atlassian */
+  --color-accent: #0065ff;
+  --color-accent-hover: #0052cc;
+  --color-accent-dim: rgba(0, 101, 255, 0.08);
+  --color-accent-glow: rgba(0, 101, 255, 0.04);
+
+  --color-teal: #00b8d9;
+  --color-teal-dim: rgba(0, 184, 217, 0.08);
+
+  --color-green: #36b37e;
+  --color-green-dim: rgba(54, 179, 126, 0.08);
+
+  --color-danger: #de350b;
+  --color-danger-dim: rgba(222, 53, 11, 0.06);
+
+  --color-warning: #ff991f;
+  --color-warning-dim: rgba(255, 153, 31, 0.06);
+
+  --color-purple: #6554c0;
+  --color-purple-dim: rgba(101, 84, 192, 0.06);
+
+  --color-row-active: rgba(54, 179, 126, 0.06);
+  --color-row-processing: rgba(0, 101, 255, 0.06);
+  --color-row-error: rgba(222, 53, 11, 0.04);
+
+  /* Sidebar / nav */
+  --color-nav: #0747a6;
+  --color-nav-hover: #0052cc;
+  --color-nav-text: rgba(255, 255, 255, 0.9);
+  --color-nav-text-dim: rgba(255, 255, 255, 0.6);
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-foreground);
+  font-family: var(--font-display);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-dim);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* Row animations */
+@keyframes row-fill {
+  0% { background-color: rgba(54, 179, 126, 0.15); }
+  100% { background-color: transparent; }
+}
+
+@keyframes row-pulse {
+  0%, 100% { background-color: rgba(0, 101, 255, 0.03); }
+  50% { background-color: rgba(0, 101, 255, 0.08); }
+}
+
+.row-just-filled {
+  animation: row-fill 2s ease-out;
+}
+
+.row-processing {
+  animation: row-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.35s ease-out both;
+}
+
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+
+/* Lozenge / badge styles (Atlassian-like) */
+.lozenge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.lozenge-success { background: var(--color-green-dim); color: #006644; }
+.lozenge-info { background: var(--color-accent-dim); color: #0747a6; }
+.lozenge-warning { background: var(--color-warning-dim); color: #974f0c; }
+.lozenge-danger { background: var(--color-danger-dim); color: #bf2600; }
+.lozenge-default { background: var(--color-raised); color: var(--color-secondary); }

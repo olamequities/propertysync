@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { SheetRow } from "@/lib/types";
 
 interface SheetTableProps {
@@ -27,14 +27,54 @@ export default function SheetTable({
   failedRowIndices,
 }: SheetTableProps) {
   const processingRef = useRef<HTMLTableRowElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [animatingRow, setAnimatingRow] = useState<number | null>(null);
+  const [autoFollow, setAutoFollow] = useState(true);
+  const userScrolledRef = useRef(false);
+  const programmaticScrollRef = useRef(false);
 
-  // Auto-scroll to processing row
+  // Detect user scroll to pause auto-follow
+  // Use a timeout to distinguish user scrolls from programmatic smooth scrolls
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleScroll = useCallback(() => {
+    if (programmaticScrollRef.current) return;
+    // Debounce — only disable auto-follow if scroll events keep firing (user dragging)
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
+      userScrolledRef.current = true;
+      setAutoFollow(false);
+    }, 150);
+  }, []);
+
+  // Auto-scroll to processing row when following
   useEffect(() => {
-    if (processingRef.current) {
-      processingRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (!autoFollow || !processingRef.current || !processingRowIndex) return;
+    programmaticScrollRef.current = true;
+    // Clear any pending user-scroll detection
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    processingRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Reset the flag after the smooth scroll completes
+    setTimeout(() => { programmaticScrollRef.current = false; }, 1000);
+  }, [processingRowIndex, autoFollow]);
+
+  // Re-enable auto-follow when sync starts (new processingRowIndex appears)
+  useEffect(() => {
+    if (processingRowIndex) {
+      userScrolledRef.current = false;
+      setAutoFollow(true);
     }
-  }, [processingRowIndex]);
+  }, [!!processingRowIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function jumpToCurrent() {
+    setAutoFollow(true);
+    userScrolledRef.current = false;
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    if (processingRef.current) {
+      programmaticScrollRef.current = true;
+      processingRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => { programmaticScrollRef.current = false; }, 1000);
+    }
+  }
 
   // Trigger fill animation
   useEffect(() => {
@@ -80,8 +120,12 @@ export default function SheetTable({
   }
 
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
+    <div className="bg-surface border border-border rounded-lg overflow-hidden relative">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="overflow-x-auto overflow-y-auto max-h-[520px]"
+      >
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10">
             <tr className="bg-raised border-b border-border">
@@ -140,6 +184,19 @@ export default function SheetTable({
           </tbody>
         </table>
       </div>
+
+      {/* Jump to current row button — shown when user scrolls away during sync */}
+      {processingRowIndex && !autoFollow && (
+        <button
+          onClick={jumpToCurrent}
+          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-2 bg-accent text-white text-xs font-semibold rounded-lg shadow-md shadow-accent/20 hover:bg-accent-hover transition-colors cursor-pointer z-20"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14M19 12l-7 7-7-7" />
+          </svg>
+          Jump to current
+        </button>
+      )}
     </div>
   );
 }

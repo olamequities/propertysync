@@ -39,7 +39,7 @@ export interface SheetTab {
 
 export interface SyncProgress {
   jobId: string;
-  status: "running" | "completed" | "cancelled" | "error";
+  status: "running" | "paused" | "completed" | "cancelled" | "error";
   total: number;
   processed: number;
   succeeded: number;

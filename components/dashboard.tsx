@@ -161,6 +161,12 @@ export default function Dashboard() {
       )
     );
     setJustFilledRowIndex(rowIndex);
+    // Update stats in real-time
+    setStats((prev) => prev ? {
+      ...prev,
+      filledRows: prev.filledRows + 1,
+      emptyRows: prev.emptyRows - 1,
+    } : prev);
   }, []);
 
   const handleProcessingRow = useCallback((address: string) => {

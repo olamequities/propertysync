@@ -6,15 +6,18 @@ import type { SyncProgress } from "./types";
 const g = globalThis as unknown as {
   __syncJobs?: Map<string, SyncProgress>;
   __syncAbort?: Map<string, AbortController>;
+  __syncPause?: Map<string, { paused: boolean; resolve: (() => void) | null }>;
   __syncActiveId?: string | null;
 };
 
 if (!g.__syncJobs) g.__syncJobs = new Map();
 if (!g.__syncAbort) g.__syncAbort = new Map();
+if (!g.__syncPause) g.__syncPause = new Map();
 if (g.__syncActiveId === undefined) g.__syncActiveId = null;
 
 const jobs = g.__syncJobs;
 const abortControllers = g.__syncAbort;
+const pauseControllers = g.__syncPause;
 
 function getActiveSyncId() { return g.__syncActiveId ?? null; }
 function setActiveSyncId(id: string | null) { g.__syncActiveId = id; }
@@ -31,14 +34,42 @@ export function getActiveJobId(): string | null {
   return getActiveSyncId();
 }
 
+export function pauseJob(jobId: string): boolean {
+  const job = jobs.get(jobId);
+  if (!job || job.status !== "running") return false;
+  job.status = "paused";
+  pauseControllers.set(jobId, { paused: true, resolve: null });
+  return true;
+}
+
+export function resumeJob(jobId: string): boolean {
+  const job = jobs.get(jobId);
+  if (!job || job.status !== "paused") return false;
+  job.status = "running";
+  const ctrl = pauseControllers.get(jobId);
+  if (ctrl?.resolve) ctrl.resolve();
+  pauseControllers.delete(jobId);
+  return true;
+}
+
 export function cancelJob(jobId: string): boolean {
   const controller = abortControllers.get(jobId);
   if (!controller) return false;
+  // If paused, unblock first so the abort can propagate
+  const pause = pauseControllers.get(jobId);
+  if (pause?.resolve) pause.resolve();
+  pauseControllers.delete(jobId);
   controller.abort();
   const job = jobs.get(jobId);
   if (job) job.status = "cancelled";
   if (getActiveSyncId() === jobId) setActiveSyncId(null);
   return true;
+}
+
+function waitIfPaused(jobId: string): Promise<void> {
+  const ctrl = pauseControllers.get(jobId);
+  if (!ctrl?.paused) return Promise.resolve();
+  return new Promise((resolve) => { ctrl.resolve = resolve; });
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -148,6 +179,7 @@ async function runSync(progress: SyncProgress, signal: AbortSignal, options: Syn
   console.log(`[sync] Found ${emptyRows.length} empty rows to process`);
 
   for (const row of emptyRows) {
+    await waitIfPaused(progress.jobId);
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
     const street = row.street.replace(/\s*#\s*\d+.*$/, ""); // Remove apt/unit
@@ -184,6 +216,8 @@ async function runSync(progress: SyncProgress, signal: AbortSignal, options: Syn
     }
 
     progress.processed++;
+    await waitIfPaused(progress.jobId);
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     await sleep(delay, signal);
   }
 

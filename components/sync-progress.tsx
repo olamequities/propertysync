@@ -68,6 +68,10 @@ export default function SyncProgress({
     await fetch(`/api/sync/${jobId}/cancel`, { method: "POST" });
   }
 
+  async function handlePauseResume() {
+    await fetch(`/api/sync/${jobId}/pause`, { method: "POST" });
+  }
+
   if (!progress) {
     return (
       <div className="bg-accent-dim border border-accent/20 rounded-lg px-4 py-3 flex items-center gap-3">
@@ -84,10 +88,12 @@ export default function SyncProgress({
       ? Math.round(((elapsed / progress.processed) * (progress.total - progress.processed)) / 1000)
       : null;
 
-  const isTerminal = progress.status !== "running";
+  const isTerminal = progress.status !== "running" && progress.status !== "paused";
+  const isActive = progress.status === "running" || progress.status === "paused";
 
   const statusMap = {
     running: { label: "Syncing", bg: "bg-accent-dim", border: "border-accent/20", text: "text-accent" },
+    paused: { label: "Paused", bg: "bg-warning-dim", border: "border-warning/20", text: "text-warning" },
     completed: { label: "Complete", bg: "bg-green-dim", border: "border-green/20", text: "text-green" },
     cancelled: { label: "Cancelled", bg: "bg-warning-dim", border: "border-warning/20", text: "text-warning" },
     error: { label: "Error", bg: "bg-danger-dim", border: "border-danger/20", text: "text-danger" },
@@ -102,6 +108,7 @@ export default function SyncProgress({
           <div
             className={`h-full transition-all duration-500 ease-out ${
               progress.status === "running" ? "bg-accent" :
+              progress.status === "paused" ? "bg-warning" :
               progress.status === "completed" ? "bg-green" :
               progress.status === "error" ? "bg-danger" : "bg-warning"
             }`}
@@ -115,6 +122,7 @@ export default function SyncProgress({
               {/* Status lozenge */}
               <span className={`lozenge ${
                 progress.status === "running" ? "lozenge-info" :
+                progress.status === "paused" ? "lozenge-warning" :
                 progress.status === "completed" ? "lozenge-success" :
                 progress.status === "error" ? "lozenge-danger" : "lozenge-warning"
               }`}>
@@ -150,9 +158,17 @@ export default function SyncProgress({
               </div>
             </div>
 
-            {/* Cancel / Dismiss buttons */}
+            {/* Pause / Cancel / Dismiss buttons */}
             <div className="flex items-center gap-2">
-              {!isTerminal && (
+              {isActive && (
+                <button
+                  onClick={handlePauseResume}
+                  className="px-3 py-1.5 text-xs font-semibold text-warning bg-warning-dim hover:bg-warning/15 rounded transition-colors cursor-pointer"
+                >
+                  {progress.status === "paused" ? "Resume" : "Pause"}
+                </button>
+              )}
+              {isActive && (
                 <button
                   onClick={handleCancel}
                   className="px-3 py-1.5 text-xs font-semibold text-danger bg-danger-dim hover:bg-danger/15 rounded transition-colors cursor-pointer"
@@ -172,9 +188,9 @@ export default function SyncProgress({
           </div>
 
           {/* Current address */}
-          {progress.currentAddress && progress.status === "running" && (
+          {progress.currentAddress && isActive && (
             <p className="text-xs text-secondary mt-2 font-[family-name:var(--font-mono)] truncate">
-              Processing: {progress.currentAddress}
+              {progress.status === "paused" ? "Paused at:" : "Processing:"} {progress.currentAddress}
             </p>
           )}
         </div>

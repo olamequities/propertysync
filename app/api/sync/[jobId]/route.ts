@@ -60,6 +60,7 @@ export async function GET(
       send(slimSnapshot(job));
 
       interval = setInterval(() => {
+        // Poll every 500ms for snappier UI updates
         const current = getJob(jobId);
         if (!current) {
           close();
@@ -75,7 +76,7 @@ export async function GET(
         ) {
           close();
         }
-      }, 1000);
+      }, 500);
     },
     cancel() {
       closed = true;

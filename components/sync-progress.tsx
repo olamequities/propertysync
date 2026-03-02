@@ -21,6 +21,7 @@ export default function SyncProgress({
 }: SyncProgressProps) {
   const [progress, setProgress] = useState<SyncProgressType | null>(null);
   const [errorsExpanded, setErrorsExpanded] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastRowRef = useRef<number | null>(null);
 
@@ -65,7 +66,13 @@ export default function SyncProgress({
   }, [jobId]);
 
   async function handleCancel() {
-    await fetch(`/api/sync/${jobId}/cancel`, { method: "POST" });
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await fetch(`/api/sync/${jobId}/cancel`, { method: "POST" });
+    } catch {
+      setCancelling(false);
+    }
   }
 
   async function handlePauseResume() {
@@ -173,9 +180,14 @@ export default function SyncProgress({
                 <button
                   type="button"
                   onClick={handleCancel}
-                  className="px-3 py-1.5 text-xs font-semibold text-danger bg-danger-dim hover:bg-danger/15 rounded transition-colors cursor-pointer"
+                  disabled={cancelling}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${
+                    cancelling
+                      ? "text-muted bg-border cursor-not-allowed"
+                      : "text-danger bg-danger-dim hover:bg-danger/15 cursor-pointer"
+                  }`}
                 >
-                  Cancel
+                  {cancelling ? "Cancelling…" : "Cancel"}
                 </button>
               )}
               {isTerminal && (

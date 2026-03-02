@@ -22,6 +22,7 @@ export default function SyncProgress({
   const [progress, setProgress] = useState<SyncProgressType | null>(null);
   const [errorsExpanded, setErrorsExpanded] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [togglingPause, setTogglingPause] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastRowRef = useRef<number | null>(null);
 
@@ -76,7 +77,15 @@ export default function SyncProgress({
   }
 
   async function handlePauseResume() {
-    await fetch(`/api/sync/${jobId}/pause`, { method: "POST" });
+    if (togglingPause) return;
+    setTogglingPause(true);
+    try {
+      await fetch(`/api/sync/${jobId}/pause`, { method: "POST" });
+    } catch {
+      // allow retry
+    } finally {
+      setTogglingPause(false);
+    }
   }
 
   if (!progress) {
@@ -171,9 +180,16 @@ export default function SyncProgress({
                 <button
                   type="button"
                   onClick={handlePauseResume}
-                  className="px-3 py-1.5 text-xs font-semibold text-warning bg-warning-dim hover:bg-warning/15 rounded transition-colors cursor-pointer"
+                  disabled={togglingPause}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${
+                    togglingPause
+                      ? "text-muted bg-border cursor-not-allowed"
+                      : "text-warning bg-warning-dim hover:bg-warning/15 cursor-pointer"
+                  }`}
                 >
-                  {progress.status === "paused" ? "Resume" : "Pause"}
+                  {togglingPause
+                    ? (progress.status === "paused" ? "Resuming…" : "Pausing…")
+                    : (progress.status === "paused" ? "Resume" : "Pause")}
                 </button>
               )}
               {isActive && (

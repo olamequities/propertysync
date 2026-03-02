@@ -162,6 +162,7 @@ export default function SyncProgress({
             <div className="flex items-center gap-2">
               {isActive && (
                 <button
+                  type="button"
                   onClick={handlePauseResume}
                   className="px-3 py-1.5 text-xs font-semibold text-warning bg-warning-dim hover:bg-warning/15 rounded transition-colors cursor-pointer"
                 >
@@ -170,6 +171,7 @@ export default function SyncProgress({
               )}
               {isActive && (
                 <button
+                  type="button"
                   onClick={handleCancel}
                   className="px-3 py-1.5 text-xs font-semibold text-danger bg-danger-dim hover:bg-danger/15 rounded transition-colors cursor-pointer"
                 >
@@ -178,6 +180,7 @@ export default function SyncProgress({
               )}
               {isTerminal && (
                 <button
+                  type="button"
                   onClick={onDismiss}
                   className="px-3 py-1.5 text-xs font-semibold text-secondary bg-raised hover:bg-border rounded transition-colors cursor-pointer"
                 >
@@ -200,6 +203,7 @@ export default function SyncProgress({
       {progress.errors.length > 0 && progress.status !== "cancelled" && (
         <div className="bg-surface border border-border rounded-lg">
           <button
+            type="button"
             onClick={() => setErrorsExpanded(!errorsExpanded)}
             className="w-full flex items-center justify-between px-4 py-2.5 text-sm cursor-pointer hover:bg-raised/50 transition-colors"
           >

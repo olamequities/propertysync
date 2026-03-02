@@ -8,7 +8,7 @@ export default function Home() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch("/api/sheet")
+    fetch("/api/auth/me")
       .then((res) => setAuthenticated(res.ok))
       .catch(() => setAuthenticated(false));
   }, []);

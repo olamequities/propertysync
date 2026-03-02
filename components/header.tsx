@@ -12,6 +12,7 @@ export default function Header({ onLogout }: { onLogout: () => void }) {
         </div>
 
         <button
+          type="button"
           onClick={onLogout}
           className="px-3 py-1.5 text-sm font-medium text-nav-text-dim hover:text-nav-text hover:bg-white/10 rounded transition-colors duration-150 cursor-pointer"
         >

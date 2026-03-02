@@ -1,8 +1,27 @@
 import { NextRequest } from "next/server";
 import { getJob } from "@/lib/sync-engine";
+import type { SyncProgress } from "@/lib/types";
+
+/** Send a lightweight snapshot — cap errors to keep SSE messages small */
+function slimSnapshot(job: SyncProgress) {
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    total: job.total,
+    processed: job.processed,
+    succeeded: job.succeeded,
+    failed: job.failed,
+    currentAddress: job.currentAddress,
+    errors: job.errors.slice(-5),
+    startedAt: job.startedAt,
+    lastCompletedRow: job.lastCompletedRow,
+  };
+}
+
+export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   const { jobId } = await params;
@@ -16,10 +35,11 @@ export async function GET(
   }
 
   const encoder = new TextEncoder();
+  let closed = false;
+  let interval: ReturnType<typeof setInterval>;
+
   const stream = new ReadableStream({
     start(controller) {
-      let closed = false;
-
       function send(data: unknown) {
         if (closed) return;
         try {
@@ -37,18 +57,16 @@ export async function GET(
         try { controller.close(); } catch { /* already closed */ }
       }
 
-      // Send initial state immediately
-      send(job);
+      send(slimSnapshot(job));
 
-      // Poll job progress every 500ms
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         const current = getJob(jobId);
         if (!current) {
           close();
           return;
         }
 
-        send(current);
+        send(slimSnapshot(current));
 
         if (
           current.status === "completed" ||
@@ -57,15 +75,25 @@ export async function GET(
         ) {
           close();
         }
-      }, 500);
+      }, 1000);
     },
+    cancel() {
+      closed = true;
+      clearInterval(interval);
+    },
+  });
+
+  request.signal.addEventListener("abort", () => {
+    closed = true;
+    clearInterval(interval);
   });
 
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

@@ -188,6 +188,7 @@ export default function SheetTable({
       {/* Jump to current row button — shown when user scrolls away during sync */}
       {processingRowIndex && !autoFollow && (
         <button
+          type="button"
           onClick={jumpToCurrent}
           className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-2 bg-accent text-white text-xs font-semibold rounded-lg shadow-md shadow-accent/20 hover:bg-accent-hover transition-colors cursor-pointer z-20"
         >

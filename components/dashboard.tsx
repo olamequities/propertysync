@@ -246,6 +246,7 @@ export default function Dashboard() {
                 </label>
                 <div className="flex border-2 border-border rounded-[4px] overflow-hidden">
                   <button
+                    type="button"
                     onClick={() => setRangeMode("all")}
                     disabled={syncing}
                     className={`px-3 py-2 text-xs font-semibold transition-colors cursor-pointer ${
@@ -257,6 +258,7 @@ export default function Dashboard() {
                     All
                   </button>
                   <button
+                    type="button"
                     onClick={() => setRangeMode("range")}
                     disabled={syncing}
                     className={`px-3 py-2 text-xs font-semibold transition-colors cursor-pointer border-l-2 border-border ${
@@ -300,6 +302,7 @@ export default function Dashboard() {
 
             {/* Refresh button */}
             <button
+              type="button"
               onClick={handleRefresh}
               disabled={refreshing || syncing}
               className="px-3 py-2 bg-surface border-2 border-border hover:bg-raised disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] text-secondary transition-colors cursor-pointer"
@@ -319,6 +322,7 @@ export default function Dashboard() {
             {/* Sync button */}
             {!syncing && (
               <button
+                type="button"
                 onClick={handleSync}
                 disabled={!stats || stats.emptyRows === 0 || loading}
                 className="px-5 py-2 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] font-semibold text-sm text-white transition-colors cursor-pointer shadow-sm"
@@ -386,6 +390,7 @@ export default function Dashboard() {
             <span className="lozenge lozenge-danger">Error</span>
             <span className="text-sm text-danger">{error}</span>
             <button
+              type="button"
               onClick={fetchData}
               className="ml-auto text-xs font-semibold text-accent hover:text-accent-hover cursor-pointer"
             >

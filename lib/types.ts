@@ -23,6 +23,7 @@ export interface SheetRow {
   borough: string;
   ownerName: string;
   billingNameAndAddress: string;
+  processed: string;
 }
 
 export interface SheetStats {

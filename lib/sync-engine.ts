@@ -174,7 +174,7 @@ async function runSync(progress: SyncProgress, signal: AbortSignal, options: Syn
     console.log(`[sync] Filtered to ${targetRows.length} rows (range ${start}-${end})`);
   }
 
-  const emptyRows = targetRows.filter((r) => !r.ownerName && !r.billingNameAndAddress);
+  const emptyRows = targetRows.filter((r) => !r.processed);
   progress.total = emptyRows.length;
   console.log(`[sync] Found ${emptyRows.length} empty rows to process`);
 

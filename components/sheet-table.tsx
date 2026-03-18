@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import type { SheetRow } from "@/lib/types";
 
 interface SheetTableProps {
@@ -20,60 +20,100 @@ const COLUMNS = [
   { key: "billingNameAndAddress", label: "Billing Info", width: "min-w-[200px]" },
 ];
 
+const ROW_HEIGHT = 37;
+const OVERSCAN = 10;
+
 export default function SheetTable({
   rows,
   processingRowIndex,
   justFilledRowIndex,
   failedRowIndices,
 }: SheetTableProps) {
-  const processingRef = useRef<HTMLTableRowElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [animatingRow, setAnimatingRow] = useState<number | null>(null);
   const [autoFollow, setAutoFollow] = useState(true);
-  const userScrolledRef = useRef(false);
   const programmaticScrollRef = useRef(false);
-
-  // Detect user scroll to pause auto-follow
-  // Use a timeout to distinguish user scrolls from programmatic smooth scrolls
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Virtualization state
+  const [scrollTop, setScrollTop] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(520);
+
+  const totalHeight = rows.length * ROW_HEIGHT;
+
+  const { startIndex, endIndex } = useMemo(() => {
+    const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT);
+    const end = Math.min(rows.length, start + visibleCount + OVERSCAN * 2);
+    return { startIndex: start, endIndex: end };
+  }, [scrollTop, containerHeight, rows.length]);
+
+  const visibleRows = useMemo(
+    () => rows.slice(startIndex, endIndex),
+    [rows, startIndex, endIndex]
+  );
+
   const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    setScrollTop(el.scrollTop);
+
     if (programmaticScrollRef.current) return;
-    // Debounce — only disable auto-follow if scroll events keep firing (user dragging)
     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
     scrollTimeoutRef.current = setTimeout(() => {
-      userScrolledRef.current = true;
       setAutoFollow(false);
     }, 150);
   }, []);
 
-  // Auto-scroll to processing row when following
+  // Measure container height on mount
   useEffect(() => {
-    if (!autoFollow || !processingRef.current || !processingRowIndex) return;
-    programmaticScrollRef.current = true;
-    // Clear any pending user-scroll detection
-    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    processingRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-    // Reset the flag after the smooth scroll completes
-    setTimeout(() => { programmaticScrollRef.current = false; }, 1000);
-  }, [processingRowIndex, autoFollow]);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerHeight(entry.contentRect.height);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  // Re-enable auto-follow when sync starts (new processingRowIndex appears)
+  // Auto-follow processing row
+  useEffect(() => {
+    if (!autoFollow || !processingRowIndex) return;
+    const idx = rows.findIndex((r) => r.rowIndex === processingRowIndex);
+    if (idx === -1) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const headerHeight = 37;
+    const targetScroll = idx * ROW_HEIGHT - containerHeight / 2 + headerHeight;
+    programmaticScrollRef.current = true;
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    el.scrollTo({ top: Math.max(0, targetScroll), behavior: "smooth" });
+    setTimeout(() => { programmaticScrollRef.current = false; }, 1000);
+  }, [processingRowIndex, autoFollow, rows, containerHeight]);
+
+  // Re-enable auto-follow when sync starts
   useEffect(() => {
     if (processingRowIndex) {
-      userScrolledRef.current = false;
       setAutoFollow(true);
     }
   }, [!!processingRowIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function jumpToCurrent() {
     setAutoFollow(true);
-    userScrolledRef.current = false;
     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    if (processingRef.current) {
-      programmaticScrollRef.current = true;
-      processingRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
-      setTimeout(() => { programmaticScrollRef.current = false; }, 1000);
-    }
+    if (!processingRowIndex) return;
+    const idx = rows.findIndex((r) => r.rowIndex === processingRowIndex);
+    if (idx === -1) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const headerHeight = 37;
+    const targetScroll = idx * ROW_HEIGHT - containerHeight / 2 + headerHeight;
+    programmaticScrollRef.current = true;
+    el.scrollTo({ top: Math.max(0, targetScroll), behavior: "smooth" });
+    setTimeout(() => { programmaticScrollRef.current = false; }, 1000);
   }
 
   // Trigger fill animation
@@ -101,7 +141,7 @@ export default function SheetTable({
     if (failedRowIndices?.has(row.rowIndex)) {
       return <div className="w-2 h-2 rounded-full bg-danger" />;
     }
-    if (row.ownerName || row.billingNameAndAddress) {
+    if (row.processed) {
       return <div className="w-2 h-2 rounded-full bg-green" />;
     }
     return <div className="w-2 h-2 rounded-full bg-dim/40" />;
@@ -140,12 +180,18 @@ export default function SheetTable({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map((row) => (
+          <tbody>
+            {/* Spacer for rows above the visible window */}
+            {startIndex > 0 && (
+              <tr style={{ height: startIndex * ROW_HEIGHT }} aria-hidden>
+                <td colSpan={COLUMNS.length + 1} />
+              </tr>
+            )}
+            {visibleRows.map((row) => (
               <tr
                 key={row.rowIndex}
-                ref={row.rowIndex === processingRowIndex ? processingRef : undefined}
-                className={`${getRowClass(row)} hover:bg-raised/50 transition-colors duration-150`}
+                style={{ height: ROW_HEIGHT }}
+                className={`${getRowClass(row)} border-b border-border/50 hover:bg-raised/50 transition-colors duration-150`}
               >
                 <td className="px-3 py-2 text-center">
                   {getStatusIndicator(row)}
@@ -181,6 +227,12 @@ export default function SheetTable({
                 </td>
               </tr>
             ))}
+            {/* Spacer for rows below the visible window */}
+            {endIndex < rows.length && (
+              <tr style={{ height: (rows.length - endIndex) * ROW_HEIGHT }} aria-hidden>
+                <td colSpan={COLUMNS.length + 1} />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

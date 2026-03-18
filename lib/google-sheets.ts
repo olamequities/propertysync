@@ -40,7 +40,7 @@ export async function getSheetTabs(): Promise<SheetTab[]> {
   }));
 }
 
-/** Read all rows from the sheet. Expected columns: A:Full Address | B:House Number | C:Street | D:Borough | E:Owner Name | F:Billing Name and Address */
+/** Read all rows from the sheet. Columns: A:Full Address | B:House Number | C:Street | D:Borough | E:Owner Name | F:Billing Name and Address | G:Processed */
 export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
   const auth = getAuth();
   const sheets = google.sheets({ version: "v4", auth });
@@ -48,7 +48,7 @@ export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
 
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId: getSheetId(),
-    range: `${name}!A:F`,
+    range: `${name}!A:I`,
   });
 
   const rows = resp.data.values ?? [];
@@ -62,13 +62,14 @@ export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
     borough: row[3] ?? "",
     ownerName: row[4] ?? "",
     billingNameAndAddress: row[5] ?? "",
+    processed: row[6] ?? "",
   }));
 }
 
-/** Get sheet statistics */
+/** Get sheet statistics — uses the Processed column (G) as the source of truth */
 export async function getSheetStats(sheetName?: string): Promise<SheetStats> {
   const rows = await readAllRows(sheetName);
-  const filled = rows.filter((r) => r.ownerName || r.billingNameAndAddress).length;
+  const filled = rows.filter((r) => !!r.processed).length;
   return {
     totalRows: rows.length,
     filledRows: filled,
@@ -76,7 +77,7 @@ export async function getSheetStats(sheetName?: string): Promise<SheetStats> {
   };
 }
 
-/** Write owner name and billing info to a specific row */
+/** Write owner name, billing info, and mark as processed */
 export async function writeRowResult(
   rowIndex: number,
   ownerName: string,
@@ -89,10 +90,10 @@ export async function writeRowResult(
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: getSheetId(),
-    range: `${name}!E${rowIndex}:F${rowIndex}`,
+    range: `${name}!E${rowIndex}:G${rowIndex}`,
     valueInputOption: "RAW",
     requestBody: {
-      values: [[ownerName, billingNameAndAddress]],
+      values: [[ownerName, billingNameAndAddress, new Date().toISOString()]],
     },
   });
 }

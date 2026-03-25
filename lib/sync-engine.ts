@@ -195,10 +195,7 @@ async function runSync(progress: SyncProgress, signal: AbortSignal, options: Syn
       );
 
       const ownerName = data.owner_name ?? "";
-      const billingParts: string[] = [];
-      if (data.billing_name) billingParts.push(data.billing_name);
-      billingParts.push(...data.billing_address_lines);
-      const billing = billingParts.join(", ");
+      const billing = data.billing_name ?? "";
 
       await writeRowResult(row.rowIndex, ownerName, billing, options.sheetName);
       progress.succeeded++;

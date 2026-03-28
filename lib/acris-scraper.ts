@@ -214,16 +214,25 @@ export async function searchACRIS(borough: string, block: string, lot: string, s
   }).toString();
 
   const result = await fetchWithJar(jar, "POST", `${BASE}/DS/DocumentSearch/BBLResult`, formData, signal);
+  console.log(`[acris] BBLResult status=${result.status} html=${result.text.length} chars, url=${result.url}`);
   const $r = cheerio.load(result.text);
 
   const docs: ACRISDocument[] = [];
-  $r("tr[style]").each((_, row) => {
+  const allTrStyles = $r("tr[style]");
+  console.log(`[acris] Found ${allTrStyles.length} tr[style] rows in result page`);
+
+  allTrStyles.each((i, row) => {
     const cells = $r(row).find("td");
+    if (cells.length < 11) {
+      console.log(`[acris] Row ${i}: only ${cells.length} cells, skipping`);
+      return;
+    }
+
     const detButton = $r(cells[0]).find('input[name="DET"]');
     const onclick = detButton.attr("onclick") || "";
     const docIdMatch = onclick.match(/go_detail\("([^"]+)"\)/);
 
-    docs.push({
+    const doc: ACRISDocument = {
       crfn: $r(cells[2]).text().trim(),
       lot: $r(cells[3]).text().trim(),
       partial: $r(cells[4]).text().trim(),
@@ -233,9 +242,12 @@ export async function searchACRIS(borough: string, block: string, lot: string, s
       pages: $r(cells[8]).text().trim(),
       party1: $r(cells[9]).text().trim(),
       party2: $r(cells[10]).text().trim(),
-      amount: $r(cells[14]).text().trim(),
+      amount: cells.length > 14 ? $r(cells[14]).text().trim() : "",
       docId: docIdMatch?.[1] || "",
-    });
+    };
+
+    console.log(`[acris] Row ${i}: docType="${doc.docType}" party1="${doc.party1}" party2="${doc.party2}" date="${doc.docDate}"`);
+    docs.push(doc);
   });
 
   return docs;

@@ -1,5 +1,6 @@
 import { readAllRows, writeParcelResult, writeBlockLot } from "./google-sheets";
-import { searchACRIS, analyzeDocuments, ACRIS_MIN_DELAY } from "./acris-scraper";
+import { searchACRIS } from "./acris-opendata";
+import { analyzeDocuments } from "./acris-scraper";
 import { NYCPropertyScraper } from "./scraper";
 import type { ParcelProgress } from "./types";
 
@@ -132,7 +133,7 @@ export function startParcelScan(options: ParcelScanOptions = {}): string {
 }
 
 async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, options: ParcelScanOptions) {
-  const delay = Math.max(ACRIS_MIN_DELAY, parseInt(process.env.SCRAPER_DELAY_MS ?? "5000", 10));
+  const delay = parseInt(process.env.PARCEL_DELAY_MS ?? "1000", 10);
   const defaultBorough = process.env.SCRAPER_BOROUGH ?? "3";
 
   const allRows = await readAllRows(options.sheetName);
@@ -170,18 +171,12 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
         }
       }
 
-      console.log(`[parcel] Searching ACRIS for ${address} (B:${boroughCode} Bl:${block} L:${lot})`);
+      console.log(`[parcel] Searching Open Data for ${address} (B:${boroughCode} Bl:${block} L:${lot})`);
       const docs = await searchACRIS(boroughCode, block, lot, signal);
-      console.log(`[parcel] ${address}: got ${docs.length} docs from ACRIS`);
-      const mortgages = docs.filter(d => d.docType === "MORTGAGE");
-      const deeds = docs.filter(d => d.docType === "DEED");
-      console.log(`[parcel] ${address}: ${mortgages.length} mortgages, ${deeds.length} deeds`);
-      if (mortgages.length > 0) {
-        mortgages.forEach(m => console.log(`[parcel]   MORTGAGE: ${m.party1} -> ${m.party2} $${m.amount} on ${m.docDate}`));
-      }
+      console.log(`[parcel] ${address}: ${docs.length} docs, ${docs.filter(d => d.docType === "MORTGAGE").length} mortgages`);
 
       const analysis = analyzeDocuments(docs, row.ownerName || null);
-      console.log(`[parcel] ${address}: reverseMortgage=${analysis.reverseMortgage.detected}, hasBeenSold=${analysis.hasBeenSold}, isGoodLead=${analysis.isGoodLead}`);
+      console.log(`[parcel] ${address}: reverseMortgage=${analysis.reverseMortgage.detected}, sold=${analysis.hasBeenSold}, goodLead=${analysis.isGoodLead}`);
 
       let parcelStatus: string;
       if (analysis.isGoodLead) {

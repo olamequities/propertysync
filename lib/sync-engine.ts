@@ -1,5 +1,5 @@
 import { NYCPropertyScraper } from "./scraper";
-import { readAllRows, writeRowResult } from "./google-sheets";
+import { readAllRows, writeRowResult, writeBlockLot } from "./google-sheets";
 import type { SyncProgress } from "./types";
 
 /** In-memory job store — attached to globalThis to survive Next.js dev hot reloads */
@@ -117,6 +117,9 @@ export interface SyncOptions {
 /** Start a background sync. Returns immediately with the jobId. */
 export function startSync(options: SyncOptions = {}): string {
   if (getActiveSyncId()) throw new Error("A sync is already running");
+  // Lazy import to avoid circular dependency
+  const { isParcelRunning } = require("./parcel-engine");
+  if (isParcelRunning()) throw new Error("A parcel scan is currently running");
 
   const jobId = crypto.randomUUID();
   const controller = new AbortController();
@@ -198,6 +201,9 @@ async function runSync(progress: SyncProgress, signal: AbortSignal, options: Syn
       const billing = data.billing_name ?? "";
 
       await writeRowResult(row.rowIndex, ownerName, billing, options.sheetName);
+      if (data.block && data.lot) {
+        await writeBlockLot(row.rowIndex, data.block, data.lot, options.sheetName);
+      }
       progress.succeeded++;
       progress.lastCompletedRow = {
         rowIndex: row.rowIndex,

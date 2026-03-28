@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
-const PROTECTED_PREFIXES = ["/api/sheet", "/api/sync"];
+const PROTECTED_PREFIXES = ["/api/sheet", "/api/sync", "/api/parcels"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -25,5 +25,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/sheet/:path*", "/api/sync/:path*"],
+  matcher: ["/api/sheet/:path*", "/api/sync/:path*", "/api/parcels/:path*"],
 };

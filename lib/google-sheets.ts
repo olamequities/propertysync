@@ -40,7 +40,7 @@ export async function getSheetTabs(): Promise<SheetTab[]> {
   }));
 }
 
-/** Read all rows from the sheet. Columns: A:Full Address | B:House Number | C:Street | D:Borough | E:Owner Name | F:Billing Name and Address | G:Processed */
+/** Read all rows from the sheet. Columns: A:Full Address | B:House Number | C:Street | D:Borough | E:Owner Name | F:Billing Name | G:Block | H:Lot | I:Parcel Status | J:Parcel Details | K:Processed */
 export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
   const auth = getAuth();
   const sheets = google.sheets({ version: "v4", auth });
@@ -48,7 +48,7 @@ export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
 
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId: getSheetId(),
-    range: `${name}!A:I`,
+    range: `${name}!A:K`,
   });
 
   const rows = resp.data.values ?? [];
@@ -62,7 +62,11 @@ export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
     borough: row[3] ?? "",
     ownerName: row[4] ?? "",
     billingNameAndAddress: row[5] ?? "",
-    processed: row[6] ?? "",
+    block: row[6] ?? "",
+    lot: row[7] ?? "",
+    parcelStatus: row[8] ?? "",
+    parcelDetails: row[9] ?? "",
+    processed: row[10] ?? "",
   }));
 }
 
@@ -70,10 +74,13 @@ export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
 export async function getSheetStats(sheetName?: string): Promise<SheetStats> {
   const rows = await readAllRows(sheetName);
   const filled = rows.filter((r) => !!r.processed).length;
+  const parcelScanned = rows.filter((r) => !!r.parcelStatus).length;
   return {
     totalRows: rows.length,
     filledRows: filled,
     emptyRows: rows.length - filled,
+    parcelScanned,
+    parcelRemaining: rows.length - parcelScanned,
   };
 }
 
@@ -88,12 +95,73 @@ export async function writeRowResult(
   const sheets = google.sheets({ version: "v4", auth });
   const name = resolveSheetName(sheetName);
 
+  // Write owner + billing to E:F
   await sheets.spreadsheets.values.update({
     spreadsheetId: getSheetId(),
-    range: `${name}!E${rowIndex}:G${rowIndex}`,
+    range: `${name}!E${rowIndex}:F${rowIndex}`,
     valueInputOption: "RAW",
     requestBody: {
-      values: [[ownerName, billingNameAndAddress, new Date().toISOString()]],
+      values: [[ownerName, billingNameAndAddress]],
     },
   });
+
+  // Write processed timestamp to K
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: getSheetId(),
+    range: `${name}!K${rowIndex}`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[new Date().toISOString()]],
+    },
+  });
+}
+
+/** Write block and lot values to columns G and H */
+export async function writeBlockLot(
+  rowIndex: number,
+  block: string,
+  lot: string,
+  sheetName?: string
+): Promise<void> {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const name = resolveSheetName(sheetName);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: getSheetId(),
+    range: `${name}!G${rowIndex}:H${rowIndex}`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[block, lot]],
+    },
+  });
+}
+
+/** Write parcel analysis result to columns I and J */
+export async function writeParcelResult(
+  rowIndex: number,
+  status: string,
+  details: string,
+  sheetName?: string
+): Promise<void> {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const name = resolveSheetName(sheetName);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: getSheetId(),
+    range: `${name}!I${rowIndex}:J${rowIndex}`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[status, details]],
+    },
+  });
+}
+
+/** Count rows that have block/lot but no parcelStatus */
+export async function getParcelStats(sheetName?: string): Promise<{ pending: number; completed: number }> {
+  const rows = await readAllRows(sheetName);
+  const withBlockLot = rows.filter((r) => !!r.block && !!r.lot);
+  const completed = withBlockLot.filter((r) => !!r.parcelStatus).length;
+  return { pending: withBlockLot.length - completed, completed };
 }

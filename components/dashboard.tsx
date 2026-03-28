@@ -5,6 +5,7 @@ import type { SheetStats, SheetRow, SheetTab } from "@/lib/types";
 import Header from "./header";
 import SheetTable from "./sheet-table";
 import SyncProgress from "./sync-progress";
+import ParcelProgress from "./parcel-progress";
 
 export default function Dashboard() {
   const [tabs, setTabs] = useState<SheetTab[]>([]);
@@ -22,6 +23,11 @@ export default function Dashboard() {
   const [processingRowIndex, setProcessingRowIndex] = useState<number | undefined>();
   const [justFilledRowIndex, setJustFilledRowIndex] = useState<number | undefined>();
   const [failedRowIndices, setFailedRowIndices] = useState<Set<number>>(new Set());
+
+  // Parcel scan state
+  const [parcelScanning, setParcelScanning] = useState(false);
+  const [parcelJobId, setParcelJobId] = useState<string | null>(null);
+  const [parcelError, setParcelError] = useState("");
 
   // Row range
   const [rangeMode, setRangeMode] = useState<"all" | "range">("all");
@@ -54,6 +60,16 @@ export default function Dashboard() {
         if (data.running && data.jobId) {
           setJobId(data.jobId);
           setSyncing(true);
+        }
+      })
+      .catch(() => {});
+    // Reconnect to active parcel scan if page was refreshed
+    fetch("/api/parcels")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.running && data.jobId) {
+          setParcelJobId(data.jobId);
+          setParcelScanning(true);
         }
       })
       .catch(() => {});
@@ -166,6 +182,59 @@ export default function Dashboard() {
       ...prev,
       filledRows: prev.filledRows + 1,
       emptyRows: prev.emptyRows - 1,
+    } : prev);
+  }, []);
+
+  async function handleParcelScan() {
+    setParcelError("");
+    try {
+      const res = await fetch("/api/parcels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheetName: activeTab }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setParcelError(data.error || "Failed to start parcel scan");
+        return;
+      }
+
+      const data = await res.json();
+      setParcelJobId(data.jobId);
+      setParcelScanning(true);
+    } catch {
+      setParcelError("Failed to start parcel scan");
+    }
+  }
+
+  function handleParcelDone() {
+    // Refresh stats
+    if (activeTab) {
+      fetch(`/api/sheet?tab=${encodeURIComponent(activeTab)}`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => { if (data) setStats(data); })
+        .catch(() => {});
+    }
+  }
+
+  function handleParcelDismiss() {
+    setParcelScanning(false);
+    setParcelJobId(null);
+  }
+
+  const handleParcelRowUpdate = useCallback((rowIndex: number, parcelStatus: string, parcelDetails: string) => {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.rowIndex === rowIndex
+          ? { ...r, parcelStatus, parcelDetails }
+          : r
+      )
+    );
+    setStats((prev) => prev ? {
+      ...prev,
+      parcelScanned: prev.parcelScanned + 1,
+      parcelRemaining: prev.parcelRemaining - 1,
     } : prev);
   }, []);
 
@@ -304,7 +373,7 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={handleRefresh}
-              disabled={refreshing || syncing}
+              disabled={refreshing || syncing || parcelScanning}
               className="px-3 py-2 bg-surface border-2 border-border hover:bg-raised disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] text-secondary transition-colors cursor-pointer"
               title="Refresh sheet data"
             >
@@ -324,10 +393,22 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={handleSync}
-                disabled={!stats || stats.emptyRows === 0 || loading}
+                disabled={!stats || stats.emptyRows === 0 || loading || parcelScanning}
                 className="px-5 py-2 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] font-semibold text-sm text-white transition-colors cursor-pointer shadow-sm"
               >
                 {stats?.emptyRows === 0 ? "All rows synced" : "Start sync"}
+              </button>
+            )}
+
+            {/* Identify Parcels button */}
+            {!parcelScanning && (
+              <button
+                type="button"
+                onClick={handleParcelScan}
+                disabled={loading || syncing}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] font-semibold text-sm text-white transition-colors cursor-pointer shadow-sm"
+              >
+                Identify Parcels
               </button>
             )}
           </div>
@@ -338,33 +419,78 @@ export default function Dashboard() {
               <span className="text-danger">{syncError}</span>
             </div>
           )}
+          {parcelError && (
+            <div className="mt-3 flex items-center gap-2 text-sm">
+              <span className="lozenge lozenge-danger">Error</span>
+              <span className="text-danger">{parcelError}</span>
+            </div>
+          )}
         </div>
 
-        {/* Stats row */}
+        {/* Stats row — Sync + Parcel side by side */}
         {stats && !loading && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 animate-fade-in-up stagger-2">
-            <div className="bg-surface border border-border rounded-lg px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted mb-1">Total Rows</p>
-              <p className="text-2xl font-semibold text-foreground tabular-nums">{stats.totalRows}</p>
-            </div>
-            <div className="bg-surface border border-border rounded-lg px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted mb-1">Completed</p>
-              <p className="text-2xl font-semibold text-green tabular-nums">{stats.filledRows}</p>
-            </div>
-            <div className="bg-surface border border-border rounded-lg px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted mb-1">Remaining</p>
-              <p className="text-2xl font-semibold text-warning tabular-nums">{stats.emptyRows}</p>
-            </div>
-            <div className="bg-surface border border-border rounded-lg px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted mb-1">Progress</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in-up stagger-2">
+            {/* Sync stats */}
+            <div className="bg-surface border border-border rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-accent" />
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Property Sync</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Total</p>
+                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.totalRows}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Synced</p>
+                  <p className="text-xl font-semibold text-green tabular-nums">{stats.filledRows}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Remaining</p>
+                  <p className="text-xl font-semibold text-warning tabular-nums">{stats.emptyRows}</p>
+                </div>
+              </div>
               <div className="flex items-center gap-3">
-                <p className="text-2xl font-semibold text-foreground tabular-nums">{pct}%</p>
                 <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-accent h-full rounded-full transition-all duration-500"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
+                <span className="text-xs font-semibold text-muted tabular-nums w-10 text-right">{pct}%</span>
+              </div>
+            </div>
+
+            {/* Parcel stats */}
+            <div className="bg-surface border border-border rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-purple-500" />
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Parcel Scan</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Total</p>
+                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.totalRows}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Scanned</p>
+                  <p className="text-xl font-semibold text-green tabular-nums">{stats.parcelScanned}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Remaining</p>
+                  <p className="text-xl font-semibold text-warning tabular-nums">{stats.parcelRemaining}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-purple-500 h-full rounded-full transition-all duration-500"
+                    style={{ width: `${stats.totalRows > 0 ? Math.round((stats.parcelScanned / stats.totalRows) * 100) : 0}%` }}
+                  />
+                </div>
+                <span className="text-xs font-semibold text-muted tabular-nums w-10 text-right">
+                  {stats.totalRows > 0 ? Math.round((stats.parcelScanned / stats.totalRows) * 100) : 0}%
+                </span>
               </div>
             </div>
           </div>
@@ -380,6 +506,18 @@ export default function Dashboard() {
               onRowUpdate={handleRowUpdate}
               onProcessingRow={handleProcessingRow}
               rows={rows}
+            />
+          </div>
+        )}
+
+        {/* Parcel scan progress banner */}
+        {parcelScanning && parcelJobId && (
+          <div className="animate-fade-in-up">
+            <ParcelProgress
+              jobId={parcelJobId}
+              onDone={handleParcelDone}
+              onDismiss={handleParcelDismiss}
+              onRowUpdate={handleParcelRowUpdate}
             />
           </div>
         )}

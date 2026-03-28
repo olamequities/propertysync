@@ -24,18 +24,41 @@ export interface SheetRow {
   ownerName: string;
   billingNameAndAddress: string;
   processed: string;
+  block: string;        // col G
+  lot: string;          // col H
+  parcelStatus: string; // col I
+  parcelDetails: string; // col J
 }
 
 export interface SheetStats {
   totalRows: number;
   filledRows: number;
   emptyRows: number;
+  parcelScanned: number;
+  parcelRemaining: number;
 }
 
 export interface SheetTab {
   title: string;
   index: number;
   rowCount: number;
+}
+
+export interface ParcelProgress {
+  jobId: string;
+  status: "running" | "paused" | "completed" | "cancelled" | "error";
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  currentAddress: string;
+  errors: { row: number; address: string; error: string }[];
+  startedAt: number;
+  lastCompletedRow?: {
+    rowIndex: number;
+    parcelStatus: string;
+    parcelDetails: string;
+  };
 }
 
 export interface SyncProgress {

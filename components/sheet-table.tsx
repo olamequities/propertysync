@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import type { SheetRow } from "@/lib/types";
 
+type ParcelFilter = "ALL" | "GOOD_LEAD" | "SOLD" | "NO_REVERSE_MORTGAGE" | "SATISFIED" | "ERROR" | "PENDING";
+type SyncFilter = "ALL" | "SYNCED" | "UNSYNCED";
+
 interface SheetTableProps {
   rows: SheetRow[];
   processingRowIndex?: number;
@@ -18,10 +21,55 @@ const COLUMNS = [
   { key: "borough", label: "Borough", width: "w-24" },
   { key: "ownerName", label: "Owner Name", width: "min-w-[160px]" },
   { key: "billingNameAndAddress", label: "Billing Info", width: "min-w-[200px]" },
+  { key: "parcelStatus", label: "Parcel Status", width: "w-36" },
+  { key: "parcelDetails", label: "Details", width: "min-w-[180px]" },
 ];
+
+const PARCEL_LOZENGE: Record<string, { class: string; label: string }> = {
+  GOOD_LEAD: { class: "lozenge-success", label: "Good Lead" },
+  SOLD: { class: "lozenge-danger", label: "Sold" },
+  NO_REVERSE_MORTGAGE: { class: "lozenge-default", label: "No Rev. Mtg" },
+  SATISFIED: { class: "lozenge-warning", label: "Satisfied" },
+  ERROR: { class: "lozenge-danger", label: "Error" },
+};
 
 const ROW_HEIGHT = 37;
 const OVERSCAN = 10;
+
+const PARCEL_FILTER_OPTIONS: { value: ParcelFilter; label: string }[] = [
+  { value: "ALL", label: "All" },
+  { value: "GOOD_LEAD", label: "Good Lead" },
+  { value: "SOLD", label: "Sold" },
+  { value: "NO_REVERSE_MORTGAGE", label: "No Rev. Mtg" },
+  { value: "SATISFIED", label: "Satisfied" },
+  { value: "ERROR", label: "Error" },
+  { value: "PENDING", label: "Pending" },
+];
+
+const SYNC_FILTER_OPTIONS: { value: SyncFilter; label: string }[] = [
+  { value: "ALL", label: "All" },
+  { value: "SYNCED", label: "Synced" },
+  { value: "UNSYNCED", label: "Unsynced" },
+];
+
+function exportCSV(rows: SheetRow[], filename: string) {
+  const headers = ["Full Address", "House Number", "Street", "Borough", "Owner Name", "Billing Name", "Block", "Lot", "Parcel Status", "Parcel Details"];
+  const csvRows = [
+    headers.join(","),
+    ...rows.map((r) =>
+      [r.fullAddress, r.houseNumber, r.street, r.borough, r.ownerName, r.billingNameAndAddress, r.block, r.lot, r.parcelStatus, r.parcelDetails]
+        .map((v) => `"${(v || "").replace(/"/g, '""')}"`)
+        .join(",")
+    ),
+  ];
+  const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function SheetTable({
   rows,
@@ -35,22 +83,60 @@ export default function SheetTable({
   const programmaticScrollRef = useRef(false);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Filter state
+  const [parcelFilter, setParcelFilter] = useState<ParcelFilter>("ALL");
+  const [syncFilter, setSyncFilter] = useState<SyncFilter>("ALL");
+  const [searchText, setSearchText] = useState("");
+
+  const filteredRows = useMemo(() => {
+    let result = rows;
+
+    if (parcelFilter !== "ALL") {
+      if (parcelFilter === "PENDING") {
+        result = result.filter((r) => !r.parcelStatus);
+      } else {
+        result = result.filter((r) => r.parcelStatus === parcelFilter);
+      }
+    }
+
+    if (syncFilter === "SYNCED") {
+      result = result.filter((r) => !!r.processed);
+    } else if (syncFilter === "UNSYNCED") {
+      result = result.filter((r) => !r.processed);
+    }
+
+    if (searchText.trim()) {
+      const q = searchText.toLowerCase();
+      result = result.filter((r) =>
+        r.fullAddress.toLowerCase().includes(q) ||
+        r.ownerName.toLowerCase().includes(q) ||
+        r.billingNameAndAddress.toLowerCase().includes(q) ||
+        r.street.toLowerCase().includes(q) ||
+        r.borough.toLowerCase().includes(q)
+      );
+    }
+
+    return result;
+  }, [rows, parcelFilter, syncFilter, searchText]);
+
+  const isFiltered = parcelFilter !== "ALL" || syncFilter !== "ALL" || searchText.trim() !== "";
+
   // Virtualization state
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(520);
 
-  const totalHeight = rows.length * ROW_HEIGHT;
+  const totalHeight = filteredRows.length * ROW_HEIGHT;
 
   const { startIndex, endIndex } = useMemo(() => {
     const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
     const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT);
-    const end = Math.min(rows.length, start + visibleCount + OVERSCAN * 2);
+    const end = Math.min(filteredRows.length, start + visibleCount + OVERSCAN * 2);
     return { startIndex: start, endIndex: end };
-  }, [scrollTop, containerHeight, rows.length]);
+  }, [scrollTop, containerHeight, filteredRows.length]);
 
   const visibleRows = useMemo(
-    () => rows.slice(startIndex, endIndex),
-    [rows, startIndex, endIndex]
+    () => filteredRows.slice(startIndex, endIndex),
+    [filteredRows, startIndex, endIndex]
   );
 
   const handleScroll = useCallback(() => {
@@ -81,7 +167,7 @@ export default function SheetTable({
   // Auto-follow processing row
   useEffect(() => {
     if (!autoFollow || !processingRowIndex) return;
-    const idx = rows.findIndex((r) => r.rowIndex === processingRowIndex);
+    const idx = filteredRows.findIndex((r) => r.rowIndex === processingRowIndex);
     if (idx === -1) return;
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -92,7 +178,7 @@ export default function SheetTable({
     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
     el.scrollTo({ top: Math.max(0, targetScroll), behavior: "smooth" });
     setTimeout(() => { programmaticScrollRef.current = false; }, 1000);
-  }, [processingRowIndex, autoFollow, rows, containerHeight]);
+  }, [processingRowIndex, autoFollow, filteredRows, containerHeight]);
 
   // Re-enable auto-follow when sync starts
   useEffect(() => {
@@ -105,7 +191,7 @@ export default function SheetTable({
     setAutoFollow(true);
     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
     if (!processingRowIndex) return;
-    const idx = rows.findIndex((r) => r.rowIndex === processingRowIndex);
+    const idx = filteredRows.findIndex((r) => r.rowIndex === processingRowIndex);
     if (idx === -1) return;
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -161,6 +247,84 @@ export default function SheetTable({
 
   return (
     <div className="bg-surface border border-border rounded-lg overflow-hidden relative">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-border bg-raised/50">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[180px] max-w-[280px]">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search address, owner..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 bg-surface border border-border rounded text-xs text-foreground placeholder-dim focus:outline-none focus:border-accent transition-colors"
+          />
+        </div>
+
+        {/* Sync filter */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Sync:</span>
+          <div className="flex border border-border rounded overflow-hidden">
+            {SYNC_FILTER_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setSyncFilter(opt.value)}
+                className={`px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                  syncFilter === opt.value
+                    ? "bg-accent text-white"
+                    : "bg-surface text-secondary hover:bg-raised"
+                } ${opt.value !== "ALL" ? "border-l border-border" : ""}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Parcel filter */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Parcel:</span>
+          <select
+            value={parcelFilter}
+            onChange={(e) => setParcelFilter(e.target.value as ParcelFilter)}
+            className="px-2 py-1 bg-surface border border-border rounded text-[11px] text-foreground focus:outline-none focus:border-accent transition-colors cursor-pointer"
+          >
+            {PARCEL_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Row count + Export */}
+        <div className="flex items-center gap-3">
+          {isFiltered && (
+            <span className="text-[11px] text-muted">
+              {filteredRows.length} of {rows.length} rows
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => exportCSV(
+              filteredRows,
+              `property-data${parcelFilter !== "ALL" ? `-${parcelFilter.toLowerCase()}` : ""}${syncFilter !== "ALL" ? `-${syncFilter.toLowerCase()}` : ""}.csv`
+            )}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-secondary bg-surface border border-border hover:bg-raised rounded transition-colors cursor-pointer"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
@@ -225,11 +389,31 @@ export default function SheetTable({
                     <span className="text-dim italic">pending</span>
                   )}
                 </td>
+                <td className="px-3 py-2 text-xs">
+                  {row.parcelStatus ? (
+                    <span className={`lozenge ${PARCEL_LOZENGE[row.parcelStatus]?.class ?? "lozenge-default"}`}>
+                      {PARCEL_LOZENGE[row.parcelStatus]?.label ?? row.parcelStatus}
+                    </span>
+                  ) : (
+                    row.block && row.lot ? (
+                      <span className="text-dim italic">pending</span>
+                    ) : (
+                      <span className="text-dim">--</span>
+                    )
+                  )}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs truncate max-w-[200px]" title={row.parcelDetails || undefined}>
+                  {row.parcelDetails ? (
+                    <span className="text-secondary">{row.parcelDetails}</span>
+                  ) : (
+                    <span className="text-dim">--</span>
+                  )}
+                </td>
               </tr>
             ))}
             {/* Spacer for rows below the visible window */}
-            {endIndex < rows.length && (
-              <tr style={{ height: (rows.length - endIndex) * ROW_HEIGHT }} aria-hidden>
+            {endIndex < filteredRows.length && (
+              <tr style={{ height: (filteredRows.length - endIndex) * ROW_HEIGHT }} aria-hidden>
                 <td colSpan={COLUMNS.length + 1} />
               </tr>
             )}

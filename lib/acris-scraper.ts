@@ -174,15 +174,56 @@ export function detectReverseMortgage(mortgages: ACRISDocument[]): ReverseMortga
   return none;
 }
 
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [10000, 20000, 40000]; // 10s, 20s, 40s backoff
+
+function isBandwidthPage(url: string, html: string): boolean {
+  return url.includes("BandwidthPolicy") || html.includes("BandwidthPolicy") || html.includes("ACRIS-BW-POL");
+}
+
+function retrySleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    });
+  });
+}
+
 /** Search ACRIS NYC by Borough/Block/Lot and return all documents */
 export async function searchACRIS(borough: string, block: string, lot: string, signal?: AbortSignal): Promise<ACRISDocument[]> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_DELAYS[attempt - 1] || 40000;
+      console.log(`[acris] Rate limited — waiting ${delay / 1000}s before retry ${attempt}/${MAX_RETRIES}...`);
+      await retrySleep(delay, signal);
+    }
+
+    const result = await searchACRISOnce(borough, block, lot, signal);
+    if (result !== null) return result;
+  }
+
+  throw new Error("ACRIS rate limited after all retries — try increasing SCRAPER_DELAY_MS");
+}
+
+async function searchACRISOnce(borough: string, block: string, lot: string, signal?: AbortSignal): Promise<ACRISDocument[] | null> {
   const jar = new CookieJar();
 
   // Step 1: Establish session
-  await fetchWithJar(jar, "GET", `${BASE}/CP/CoverPage/MainMenu`, undefined, signal);
+  const mainPage = await fetchWithJar(jar, "GET", `${BASE}/CP/CoverPage/MainMenu`, undefined, signal);
+  if (isBandwidthPage(mainPage.url, mainPage.text)) {
+    console.log(`[acris] Bandwidth page on session init`);
+    return null;
+  }
 
   // Step 2: Get CSRF token
   const bblPage = await fetchWithJar(jar, "GET", `${BASE}/DS/DocumentSearch/BBL`, undefined, signal);
+  if (isBandwidthPage(bblPage.url, bblPage.text)) {
+    console.log(`[acris] Bandwidth page on BBL form`);
+    return null;
+  }
+
   const $ = cheerio.load(bblPage.text);
   const csrfTokens: string[] = [];
   $('input[name="__RequestVerificationToken"]').each((_, el) => {
@@ -215,6 +256,12 @@ export async function searchACRIS(borough: string, block: string, lot: string, s
 
   const result = await fetchWithJar(jar, "POST", `${BASE}/DS/DocumentSearch/BBLResult`, formData, signal);
   console.log(`[acris] BBLResult status=${result.status} html=${result.text.length} chars, url=${result.url}`);
+
+  if (isBandwidthPage(result.url, result.text)) {
+    console.log(`[acris] Bandwidth page on search results`);
+    return null;
+  }
+
   const $r = cheerio.load(result.text);
 
   const docs: ACRISDocument[] = [];
@@ -252,6 +299,9 @@ export async function searchACRIS(borough: string, block: string, lot: string, s
 
   return docs;
 }
+
+/** Minimum delay between ACRIS requests — defaults to 5s to avoid bandwidth page */
+export const ACRIS_MIN_DELAY = parseInt(process.env.ACRIS_DELAY_MS ?? "5000", 10);
 
 /** Analyze ACRIS documents for reverse mortgage lead detection */
 export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null): DocumentAnalysis {

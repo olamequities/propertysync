@@ -1,5 +1,5 @@
 import { readAllRows, writeParcelResult, writeBlockLot } from "./google-sheets";
-import { searchACRIS, analyzeDocuments } from "./acris-scraper";
+import { searchACRIS, analyzeDocuments, ACRIS_MIN_DELAY } from "./acris-scraper";
 import { NYCPropertyScraper } from "./scraper";
 import type { ParcelProgress } from "./types";
 
@@ -132,7 +132,7 @@ export function startParcelScan(options: ParcelScanOptions = {}): string {
 }
 
 async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, options: ParcelScanOptions) {
-  const delay = parseInt(process.env.SCRAPER_DELAY_MS ?? "2000", 10);
+  const delay = Math.max(ACRIS_MIN_DELAY, parseInt(process.env.SCRAPER_DELAY_MS ?? "5000", 10));
   const defaultBorough = process.env.SCRAPER_BOROUGH ?? "3";
 
   const allRows = await readAllRows(options.sheetName);

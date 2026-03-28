@@ -39,7 +39,7 @@ export interface ACRISDocument {
 }
 
 /** Search ACRIS via NYC Open Data API by Borough/Block/Lot */
-export async function searchACRIS(borough: string, block: string, lot: string, signal?: AbortSignal): Promise<OpenDataDocument[]> {
+export async function searchACRIS(borough: string, block: string, lot: string, signal?: AbortSignal): Promise<ACRISDocument[]> {
   // Step 1: Find all document IDs for this property
   const where = `borough=${borough} AND block=${block} AND lot=${lot}`;
   const legals = await sodaFetch(LEGALS, `$where=${encodeURIComponent(where)}`, 500, signal);

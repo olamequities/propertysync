@@ -205,7 +205,7 @@ export async function searchACRIS(borough: string, block: string, lot: string, s
     hid_datefromm: "", hid_datefromd: "", hid_datefromy: "",
     hid_datetom: "", hid_datetod: "", hid_datetoy: "",
     hid_doctype: "", hid_doctype_name: "",
-    hid_max_rows: "99",
+    hid_max_rows: "200",
     hid_page: "1",
     hid_ReqID: "",
     hid_SearchType: "BBL",

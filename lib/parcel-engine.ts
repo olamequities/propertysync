@@ -172,8 +172,16 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
 
       console.log(`[parcel] Searching ACRIS for ${address} (B:${boroughCode} Bl:${block} L:${lot})`);
       const docs = await searchACRIS(boroughCode, block, lot, signal);
+      console.log(`[parcel] ${address}: got ${docs.length} docs from ACRIS`);
+      const mortgages = docs.filter(d => d.docType === "MORTGAGE");
+      const deeds = docs.filter(d => d.docType === "DEED");
+      console.log(`[parcel] ${address}: ${mortgages.length} mortgages, ${deeds.length} deeds`);
+      if (mortgages.length > 0) {
+        mortgages.forEach(m => console.log(`[parcel]   MORTGAGE: ${m.party1} -> ${m.party2} $${m.amount} on ${m.docDate}`));
+      }
 
       const analysis = analyzeDocuments(docs, row.ownerName || null);
+      console.log(`[parcel] ${address}: reverseMortgage=${analysis.reverseMortgage.detected}, hasBeenSold=${analysis.hasBeenSold}, isGoodLead=${analysis.isGoodLead}`);
 
       let parcelStatus: string;
       if (analysis.isGoodLead) {

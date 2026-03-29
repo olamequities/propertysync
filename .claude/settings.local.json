@@ -42,7 +42,12 @@
       "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx tsx scripts/test-opendata.ts 2>&1')",
       "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && node -e \"\nasync function check\\(name, id\\) {\n  const resp = await fetch\\('https://data.cityofnewyork.us/resource/' + id + '.json?\\\\$limit=1'\\);\n  const data = await resp.json\\(\\);\n  console.log\\(name + ':', Object.keys\\(data[0]\\).join\\(', '\\)\\);\n}\nasync function main\\(\\) {\n  await check\\('legals', '8h5j-fqxa'\\);\n  await check\\('master', 'bnx9-e6tj'\\);\n  await check\\('parties', '636b-3b5g'\\);\n}\nmain\\(\\).catch\\(e => console.log\\(e.message\\)\\);\n\" 2>&1')",
       "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && node -e \"\nfetch\\(\\\\\"https://data.cityofnewyork.us/resource/bnx9-e6tj.json?\\\\$where=document_id=%272023033100244002%27\\\\\"\\)\n  .then\\(r => r.json\\(\\)\\)\n  .then\\(d => console.log\\(JSON.stringify\\(d[0], null, 2\\)\\)\\);\n\" 2>&1')",
-      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx tsx scripts/test-opendata-analysis.ts 2>&1')"
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx tsx scripts/test-opendata-analysis.ts 2>&1')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx tsx scripts/test-detection-fix.ts 2>&1')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx tsx -e \"\nimport { NYCPropertyScraper } from \\\\\"./lib/scraper\\\\\";\nasync function main\\(\\) {\n  const scraper = new NYCPropertyScraper\\(\\);\n  \n  const t1 = await scraper.getPropertyDataByAddress\\(\\\\\"1000\\\\\", \\\\\"TINTON AVENUE\\\\\", \\\\\"2\\\\\"\\);\n  console.log\\(\\\\\"1000 TINTON: block=\\\\\"+t1.block+\\\\\" lot=\\\\\"+t1.lot+\\\\\" owner=\\\\\"+t1.owner_name+\\\\\" billing=\\\\\"+t1.billing_name\\);\n  \n  const t2 = await scraper.getPropertyDataByAddress\\(\\\\\"2166\\\\\", \\\\\"BRUCKNER BOULEVARD\\\\\", \\\\\"2\\\\\"\\);\n  console.log\\(\\\\\"2166 BRUCKNER: block=\\\\\"+t2.block+\\\\\" lot=\\\\\"+t2.lot+\\\\\" owner=\\\\\"+t2.owner_name+\\\\\" billing=\\\\\"+t2.billing_name\\);\n}\nmain\\(\\);\n\" 2>&1')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && node -e \"fetch\\(\\\\\"https://data.cityofnewyork.us/resource/8h5j-fqxa.json?\\\\\\\\\\\\$limit=1\\\\\"\\).then\\(r=>r.text\\(\\)\\).then\\(t=>console.log\\(t.substring\\(0,200\\)\\)\\).catch\\(e=>console.log\\(e.cause||e.message\\)\\)\" 2>&1')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && timeout 60 npx tsx scripts/test-detection-fix.ts 2>&1')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && timeout 90 npx tsx scripts/test-detection-fix.ts 2>&1')"
     ]
   }
 }

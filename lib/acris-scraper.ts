@@ -98,20 +98,38 @@ export interface DocumentAnalysis {
   reasons: string[];
 }
 
-/** Known reverse mortgage lenders / keywords in party2 */
-const REVERSE_MORTGAGE_LENDERS = [
+/** HUD / Secretary of Housing keywords */
+const HUD_KEYWORDS = [
   "hud", "housing and urban", "housing & urban", "secretary of h",
-  "hecm", "reverse mortgage",
-  "mers", "mortgage electronic registration",
 ];
 
 function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z]/g, "");
 }
 
-function isReverseMortgageLender(party: string): boolean {
+/** Check if two names match, handling "LAST, FIRST" vs "FIRST LAST" ordering */
+function namesMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const aNorm = normalizeName(a);
+  const bNorm = normalizeName(b);
+  // Direct substring match
+  if (aNorm.includes(bNorm) || bNorm.includes(aNorm)) return true;
+  // Split into parts and check if all parts of one appear in the other
+  const aParts = a.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/).filter(p => p.length > 2);
+  const bParts = b.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/).filter(p => p.length > 2);
+  if (aParts.length === 0 || bParts.length === 0) return false;
+  const aInB = aParts.every(p => bParts.some(bp => bp.includes(p) || p.includes(bp)));
+  const bInA = bParts.every(p => aParts.some(ap => ap.includes(p) || p.includes(ap)));
+  return aInB || bInA;
+}
+
+function isHudParty(party: string): boolean {
   const lower = party.toLowerCase();
-  return REVERSE_MORTGAGE_LENDERS.some(kw => lower.includes(kw));
+  return HUD_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function isPrivateLender(party: string): boolean {
+  return !isHudParty(party);
 }
 
 /** Find the original borrower — the party1 on the earliest mortgage */
@@ -126,9 +144,15 @@ function findOriginalBorrower(mortgages: ACRISDocument[]): string | null {
 }
 
 /**
- * Detect reverse mortgage pattern:
- * Two MORTGAGE docs filed on the same date by the same borrower,
- * where one goes to HUD/Secretary of Housing and the other to MERS or the lender.
+ * Detect reverse mortgage pattern (strict rules from client):
+ *
+ * A true reverse mortgage ALWAYS has:
+ * 1. Two MORTGAGE docs on the SAME DATE for the SAME AMOUNT
+ * 2. One from a private bank, one from Secretary of HUD
+ * 3. The HUD document type description contains "HECM" (though we may not have
+ *    the description in the data — the dual-mortgage pattern is the primary signal)
+ *
+ * A single HUD mortgage is just a regular FHA loan — NOT a reverse mortgage.
  */
 export function detectReverseMortgage(mortgages: ACRISDocument[]): ReverseMortgageInfo {
   const none: ReverseMortgageInfo = { detected: false, borrower: null, date: null, amount: null, lender: null, docs: [] };
@@ -136,39 +160,42 @@ export function detectReverseMortgage(mortgages: ACRISDocument[]): ReverseMortga
   // Group mortgages by date
   const byDate = new Map<string, ACRISDocument[]>();
   for (const m of mortgages) {
-    const key = m.docDate || m.recorded || "unknown";
+    const key = m.docDate || m.recorded || "";
+    if (!key || key === "unknown") continue; // skip undated mortgages
     if (!byDate.has(key)) byDate.set(key, []);
     byDate.get(key)!.push(m);
   }
 
-  // Look for pairs on same date where at least one party2 is a known reverse mortgage lender
+  // Look for the reverse mortgage pattern: same date, same amount, one HUD + one private
   for (const [date, group] of byDate) {
     if (group.length < 2) continue;
 
-    const hudDoc = group.find(m => isReverseMortgageLender(m.party2));
-    if (hudDoc) {
-      return {
-        detected: true,
-        borrower: hudDoc.party1,
-        date,
-        amount: hudDoc.amount,
-        lender: hudDoc.party2,
-        docs: group,
-      };
-    }
-  }
+    const hudDocs = group.filter(m => isHudParty(m.party2));
+    const privateDocs = group.filter(m => isPrivateLender(m.party2));
 
-  // Fallback: single mortgage to HUD/reverse lender (some only file one doc)
-  const singleHud = mortgages.find(m => isReverseMortgageLender(m.party2));
-  if (singleHud) {
-    return {
-      detected: true,
-      borrower: singleHud.party1,
-      date: singleHud.docDate || singleHud.recorded || null,
-      amount: singleHud.amount,
-      lender: singleHud.party2,
-      docs: [singleHud],
-    };
+    if (hudDocs.length === 0 || privateDocs.length === 0) continue;
+
+    // Check for matching amounts between HUD and private lender
+    for (const hud of hudDocs) {
+      const hudAmount = parseFloat(hud.amount) || 0;
+      if (hudAmount === 0) continue;
+
+      const matchingPrivate = privateDocs.find(p => {
+        const pAmount = parseFloat(p.amount) || 0;
+        return Math.abs(pAmount - hudAmount) < 1; // same amount (within rounding)
+      });
+
+      if (matchingPrivate) {
+        return {
+          detected: true,
+          borrower: hud.party1,
+          date,
+          amount: hud.amount,
+          lender: `${matchingPrivate.party2} / ${hud.party2}`,
+          docs: [matchingPrivate, hud],
+        };
+      }
+    }
   }
 
   return none;
@@ -303,8 +330,22 @@ async function searchACRISOnce(borough: string, block: string, lot: string, sign
 /** Minimum delay between ACRIS requests — defaults to 5s to avoid bandwidth page */
 export const ACRIS_MIN_DELAY = parseInt(process.env.ACRIS_DELAY_MS ?? "5000", 10);
 
+/** Check if billing name looks like a bank/servicer rather than a person */
+function billingIsBank(billing: string): boolean {
+  if (!billing) return false;
+  const lower = billing.toLowerCase();
+  const bankKeywords = [
+    "bank", "mortgage", "loan", "lending", "servic", "financial",
+    "credit", "capital", "fund", "trust", "corp", "llc", "inc",
+    "aetna", "pennymac", "wells fargo", "chase", "citi", "nationstar",
+    "ocwen", "ditech", "sps", "shellpoint", "phh", "loancare",
+    "cenlar", "flagstar", "freedom", "caliber", "newrez", "mr. cooper",
+  ];
+  return bankKeywords.some(kw => lower.includes(kw));
+}
+
 /** Analyze ACRIS documents for reverse mortgage lead detection */
-export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null): DocumentAnalysis {
+export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null, billingName?: string | null): DocumentAnalysis {
   const mortgages = docs.filter(d => d.docType === "MORTGAGE");
   const satisfactions = docs.filter(d => d.docType === "SATISFACTION OF MORTGAGE");
   const deeds = docs.filter(d => d.docType === "DEED");
@@ -333,20 +374,11 @@ export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null
     const buyer = lastDeed.party2;
     const seller = lastDeed.party1;
 
-    const sellerNorm = normalizeName(seller);
-    const buyerNorm = normalizeName(buyer);
-    const isSelfTransfer = sellerNorm === buyerNorm ||
-      sellerNorm.includes(buyerNorm) ||
-      buyerNorm.includes(sellerNorm);
+    const isSelfTransfer = namesMatch(seller, buyer);
 
     if (!isSelfTransfer && lastDeed.docDate) {
-      const borrowerNorm = originalBorrower ? normalizeName(originalBorrower) : "";
-      const ownerNorm = ownerName ? normalizeName(ownerName) : "";
-      const buyerMatchesBorrower = borrowerNorm &&
-        (buyerNorm.includes(borrowerNorm) || borrowerNorm.includes(buyerNorm));
-      // If the deed buyer is the current owner, this is how they acquired the property — not a resale
-      const buyerIsCurrentOwner = ownerNorm &&
-        (buyerNorm.includes(ownerNorm) || ownerNorm.includes(buyerNorm));
+      const buyerMatchesBorrower = originalBorrower ? namesMatch(buyer, originalBorrower) : false;
+      const buyerIsCurrentOwner = ownerName ? namesMatch(buyer, ownerName) : false;
 
       if (!buyerMatchesBorrower && !buyerIsCurrentOwner) {
         hasBeenSold = true;
@@ -355,13 +387,8 @@ export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null
     }
 
     if (latestMortgage && originalBorrower) {
-      const latestBorrowerNorm = normalizeName(latestMortgage.party1);
-      const origNorm = normalizeName(originalBorrower);
-      const ownerNorm = ownerName ? normalizeName(ownerName) : "";
-      const sameAsBorrower = latestBorrowerNorm.includes(origNorm) || origNorm.includes(latestBorrowerNorm);
-      // If the latest mortgage is by the current owner, it's not evidence of a sale
-      const latestIsCurrentOwner = ownerNorm &&
-        (latestBorrowerNorm.includes(ownerNorm) || ownerNorm.includes(latestBorrowerNorm));
+      const sameAsBorrower = namesMatch(latestMortgage.party1, originalBorrower);
+      const latestIsCurrentOwner = ownerName ? namesMatch(latestMortgage.party1, ownerName) : false;
 
       if (!sameAsBorrower && !latestIsCurrentOwner) {
         hasBeenSold = true;
@@ -406,22 +433,48 @@ export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null
     });
   }
 
+  // Billing name pre-filter: if billing is a bank, it's NOT a reverse mortgage lead
+  const billingIsBankName = billingName ? billingIsBank(billingName) : false;
+
+  // Check if the reverse mortgage borrower matches the current owner
+  let reverseMortgageBorrowerIsCurrent = true;
+  if (reverseMortgage.detected && reverseMortgage.borrower && ownerName) {
+    reverseMortgageBorrowerIsCurrent = namesMatch(reverseMortgage.borrower, ownerName);
+  }
+
   if (reverseMortgage.detected) {
     reasons.push(`REVERSE MORTGAGE: ${reverseMortgage.borrower} -> ${reverseMortgage.lender} ($${reverseMortgage.amount}) on ${reverseMortgage.date}`);
-    if (reverseMortgage.docs.length >= 2) {
-      reasons.push(`Filed as ${reverseMortgage.docs.length} docs on same date (typical reverse mortgage pattern)`);
+    reasons.push(`Dual mortgage pattern: same amount, same date, private lender + HUD`);
+    if (!reverseMortgageBorrowerIsCurrent) {
+      reasons.push(`Reverse mortgage borrower "${reverseMortgage.borrower}" is NOT the current owner "${ownerName}"`);
     }
     if (reverseMortgageSatisfied) {
       reasons.push("Reverse mortgage has been SATISFIED");
     }
   } else {
-    reasons.push("No reverse mortgage detected");
+    reasons.push("No reverse mortgage detected (no dual-mortgage pattern found)");
   }
 
-  let isGoodLead = reverseMortgage.detected && !hasBeenSold && !reverseMortgageSatisfied;
+  if (billingName) {
+    if (billingIsBankName) {
+      reasons.push(`Billing name "${billingName}" is a bank/servicer — NOT a reverse mortgage`);
+    } else {
+      reasons.push(`Billing name "${billingName}" is the owner — consistent with reverse mortgage`);
+    }
+  }
+
+  let isGoodLead = reverseMortgage.detected && !hasBeenSold && !reverseMortgageSatisfied && !billingIsBankName && reverseMortgageBorrowerIsCurrent;
 
   if (hasBeenSold) {
     reasons.push("BAD LEAD: Property has been sold");
+  }
+
+  if (!reverseMortgageBorrowerIsCurrent && reverseMortgage.detected) {
+    reasons.push("BAD LEAD: Reverse mortgage was under a previous owner");
+  }
+
+  if (billingIsBankName && reverseMortgage.detected) {
+    reasons.push("BAD LEAD: Billing is a bank — reverse mortgage likely not active");
   }
 
   if (reverseMortgageSatisfied && !hasBeenSold) {
@@ -434,7 +487,7 @@ export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null
   }
 
   if (isGoodLead) {
-    reasons.push("GOOD LEAD: Active reverse mortgage, property not sold");
+    reasons.push("GOOD LEAD: Active reverse mortgage, current owner is borrower, billing is owner");
   }
 
   return {

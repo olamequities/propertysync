@@ -175,7 +175,7 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
       const docs = await searchACRIS(boroughCode, block, lot, signal);
       console.log(`[parcel] ${address}: ${docs.length} docs, ${docs.filter(d => d.docType === "MORTGAGE").length} mortgages`);
 
-      const analysis = analyzeDocuments(docs, row.ownerName || null);
+      const analysis = analyzeDocuments(docs, row.ownerName || null, row.billingNameAndAddress || null);
       console.log(`[parcel] ${address}: reverseMortgage=${analysis.reverseMortgage.detected}, sold=${analysis.hasBeenSold}, goodLead=${analysis.isGoodLead}`);
 
       let parcelStatus: string;
@@ -185,8 +185,11 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
         parcelStatus = "SOLD";
       } else if (!analysis.reverseMortgage.detected) {
         parcelStatus = "NO_REVERSE_MORTGAGE";
+      } else if (analysis.reasons.some(r => r.includes("previous owner"))) {
+        parcelStatus = "SOLD";
+      } else if (analysis.reasons.some(r => r.includes("Billing is a bank"))) {
+        parcelStatus = "NO_REVERSE_MORTGAGE";
       } else {
-        // Reverse mortgage detected but satisfied
         parcelStatus = "SATISFIED";
       }
 

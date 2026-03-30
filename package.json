@@ -1,11 +1,17 @@
 {
   "name": "olam-app",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:build": "next build && electron-builder --win --mac",
+    "electron:build:win": "next build && electron-builder --win",
+    "electron:build:mac": "next build && electron-builder --mac",
+    "electron:start": "electron ."
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.0.0",
@@ -27,5 +33,60 @@
     "electron": "^41.1.0",
     "electron-builder": "^26.8.1",
     "wait-on": "^9.0.4"
+  },
+  "build": {
+    "appId": "com.olam.propertysync",
+    "productName": "PropScope",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      ".next/standalone/**/*",
+      ".next/static/**/*",
+      "public/**/*",
+      "electron/**/*",
+      "scripts/estate-scanner.py"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "app",
+        "filter": ["**/*"]
+      },
+      {
+        "from": ".next/static",
+        "to": "app/.next/static",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "public",
+        "to": "app/public",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "scripts/estate-scanner.py",
+        "to": "scripts/estate-scanner.py"
+      }
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "lchira99",
+      "repo": "olam-app"
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "public/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

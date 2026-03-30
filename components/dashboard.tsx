@@ -6,6 +6,7 @@ import Header from "./header";
 import SheetTable from "./sheet-table";
 import SyncProgress from "./sync-progress";
 import ParcelProgress from "./parcel-progress";
+import EstateProgress from "./estate-progress";
 
 export default function Dashboard() {
   const [tabs, setTabs] = useState<SheetTab[]>([]);
@@ -28,6 +29,11 @@ export default function Dashboard() {
   const [parcelScanning, setParcelScanning] = useState(false);
   const [parcelJobId, setParcelJobId] = useState<string | null>(null);
   const [parcelError, setParcelError] = useState("");
+
+  // Estate scan state
+  const [estateScanning, setEstateScanning] = useState(false);
+  const [estateJobId, setEstateJobId] = useState<string | null>(null);
+  const [estateError, setEstateError] = useState("");
 
   // Row range
   const [rangeMode, setRangeMode] = useState<"all" | "range">("all");
@@ -70,6 +76,16 @@ export default function Dashboard() {
         if (data.running && data.jobId) {
           setParcelJobId(data.jobId);
           setParcelScanning(true);
+        }
+      })
+      .catch(() => {});
+    // Reconnect to active estate scan if page was refreshed
+    fetch("/api/estate")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.running && data.jobId) {
+          setEstateJobId(data.jobId);
+          setEstateScanning(true);
         }
       })
       .catch(() => {});
@@ -235,6 +251,68 @@ export default function Dashboard() {
       ...prev,
       parcelScanned: prev.parcelScanned + 1,
       parcelRemaining: prev.parcelRemaining - 1,
+    } : prev);
+  }, []);
+
+  // Estate scan handlers
+  async function handleEstateScan() {
+    setEstateError("");
+    try {
+      const res = await fetch("/api/estate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheetName: activeTab }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setEstateError(data.error || "Failed to start estate scan");
+        return;
+      }
+      const data = await res.json();
+      setEstateJobId(data.jobId);
+      setEstateScanning(true);
+
+      // Launch the Python estate scanner
+      const launchRes = await fetch("/api/estate/launch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheetName: activeTab, searches: data.searches }),
+      });
+      if (!launchRes.ok) {
+        const launchData = await launchRes.json();
+        setEstateError(launchData.error || "Failed to launch estate scanner");
+      }
+    } catch {
+      setEstateError("Failed to start estate scan");
+    }
+  }
+
+  function handleEstateDone() {
+    if (activeTab) {
+      fetch(`/api/sheet?tab=${encodeURIComponent(activeTab)}`)
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => { if (data) setStats(data); })
+        .catch(() => {});
+    }
+  }
+
+  function handleEstateDismiss() {
+    setEstateScanning(false);
+    setEstateJobId(null);
+  }
+
+  const handleEstateRowUpdate = useCallback((rowIndex: number, estateStatus: string, estateFileNumber: string) => {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.rowIndex === rowIndex
+          ? { ...r, estateStatus, estateFileNumber }
+          : r
+      )
+    );
+    setStats((prev) => prev ? {
+      ...prev,
+      estateChecked: prev.estateChecked + 1,
+      estateRemaining: prev.estateRemaining - 1,
     } : prev);
   }, []);
 
@@ -411,6 +489,18 @@ export default function Dashboard() {
                 Identify Parcels
               </button>
             )}
+
+            {/* Check Estates button */}
+            {!estateScanning && (
+              <button
+                type="button"
+                onClick={handleEstateScan}
+                disabled={loading || syncing || parcelScanning}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] font-semibold text-sm text-white transition-colors cursor-pointer shadow-sm"
+              >
+                Check Estates
+              </button>
+            )}
           </div>
 
           {syncError && (
@@ -425,11 +515,17 @@ export default function Dashboard() {
               <span className="text-danger">{parcelError}</span>
             </div>
           )}
+          {estateError && (
+            <div className="mt-3 flex items-center gap-2 text-sm">
+              <span className="lozenge lozenge-danger">Error</span>
+              <span className="text-danger">{estateError}</span>
+            </div>
+          )}
         </div>
 
         {/* Stats row — Sync + Parcel side by side */}
         {stats && !loading && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in-up stagger-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in-up stagger-2">
             {/* Sync stats */}
             <div className="bg-surface border border-border rounded-lg p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -493,6 +589,39 @@ export default function Dashboard() {
                 </span>
               </div>
             </div>
+
+            {/* Estate stats */}
+            <div className="bg-surface border border-border rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-amber-500" />
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Estate Check</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Good Leads</p>
+                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.estateChecked + stats.estateRemaining}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Checked</p>
+                  <p className="text-xl font-semibold text-green tabular-nums">{stats.estateChecked}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Remaining</p>
+                  <p className="text-xl font-semibold text-warning tabular-nums">{stats.estateRemaining}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-amber-500 h-full rounded-full transition-all duration-500"
+                    style={{ width: `${(stats.estateChecked + stats.estateRemaining) > 0 ? Math.round((stats.estateChecked / (stats.estateChecked + stats.estateRemaining)) * 100) : 0}%` }}
+                  />
+                </div>
+                <span className="text-xs font-semibold text-muted tabular-nums w-10 text-right">
+                  {(stats.estateChecked + stats.estateRemaining) > 0 ? Math.round((stats.estateChecked / (stats.estateChecked + stats.estateRemaining)) * 100) : 0}%
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -518,6 +647,18 @@ export default function Dashboard() {
               onDone={handleParcelDone}
               onDismiss={handleParcelDismiss}
               onRowUpdate={handleParcelRowUpdate}
+            />
+          </div>
+        )}
+
+        {/* Estate scan progress banner */}
+        {estateScanning && estateJobId && (
+          <div className="animate-fade-in-up">
+            <EstateProgress
+              jobId={estateJobId}
+              onDone={handleEstateDone}
+              onDismiss={handleEstateDismiss}
+              onRowUpdate={handleEstateRowUpdate}
             />
           </div>
         )}

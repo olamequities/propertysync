@@ -4,3 +4,8 @@ node_modules
 *.md
 .env*
 !.env.example
+dist-electron
+electron
+scripts
+*.py
+.claude

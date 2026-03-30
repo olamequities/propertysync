@@ -23,6 +23,8 @@ const COLUMNS = [
   { key: "billingNameAndAddress", label: "Billing Info", width: "min-w-[200px]" },
   { key: "parcelStatus", label: "Parcel Status", width: "w-36" },
   { key: "parcelDetails", label: "Details", width: "min-w-[180px]" },
+  { key: "estateStatus", label: "Estate", width: "w-24" },
+  { key: "estateFileNumber", label: "File Number", width: "min-w-[140px]" },
 ];
 
 const PARCEL_LOZENGE: Record<string, { class: string; label: string }> = {
@@ -53,11 +55,11 @@ const SYNC_FILTER_OPTIONS: { value: SyncFilter; label: string }[] = [
 ];
 
 function exportCSV(rows: SheetRow[], filename: string) {
-  const headers = ["Full Address", "House Number", "Street", "Borough", "Owner Name", "Billing Name", "Block", "Lot", "Parcel Status", "Parcel Details"];
+  const headers = ["Full Address", "House Number", "Street", "Borough", "Owner Name", "Billing Name", "Block", "Lot", "Parcel Status", "Parcel Details", "Estate Status", "Estate File Number"];
   const csvRows = [
     headers.join(","),
     ...rows.map((r) =>
-      [r.fullAddress, r.houseNumber, r.street, r.borough, r.ownerName, r.billingNameAndAddress, r.block, r.lot, r.parcelStatus, r.parcelDetails]
+      [r.fullAddress, r.houseNumber, r.street, r.borough, r.ownerName, r.billingNameAndAddress, r.block, r.lot, r.parcelStatus, r.parcelDetails, r.estateStatus, r.estateFileNumber]
         .map((v) => `"${(v || "").replace(/"/g, '""')}"`)
         .join(",")
     ),
@@ -405,6 +407,26 @@ export default function SheetTable({
                 <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs truncate max-w-[200px]" title={row.parcelDetails || undefined}>
                   {row.parcelDetails ? (
                     <span className="text-secondary">{row.parcelDetails}</span>
+                  ) : (
+                    <span className="text-dim">--</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {row.estateStatus === "YES" ? (
+                    <span className="lozenge lozenge-success">Yes</span>
+                  ) : row.estateStatus === "NO" ? (
+                    <span className="lozenge lozenge-default">No</span>
+                  ) : row.estateStatus === "ERROR" ? (
+                    <span className="lozenge lozenge-danger">Error</span>
+                  ) : row.parcelStatus === "GOOD_LEAD" ? (
+                    <span className="text-dim italic">pending</span>
+                  ) : (
+                    <span className="text-dim">--</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 font-[family-name:var(--font-mono)] text-xs truncate max-w-[160px]" title={row.estateFileNumber || undefined}>
+                  {row.estateFileNumber ? (
+                    <span className="text-secondary">{row.estateFileNumber}</span>
                   ) : (
                     <span className="text-dim">--</span>
                   )}

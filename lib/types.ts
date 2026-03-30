@@ -28,6 +28,8 @@ export interface SheetRow {
   lot: string;          // col H
   parcelStatus: string; // col I
   parcelDetails: string; // col J
+  estateStatus: string;  // col L
+  estateFileNumber: string; // col M
 }
 
 export interface SheetStats {
@@ -36,6 +38,8 @@ export interface SheetStats {
   emptyRows: number;
   parcelScanned: number;
   parcelRemaining: number;
+  estateChecked: number;
+  estateRemaining: number;
 }
 
 export interface SheetTab {

@@ -40,7 +40,7 @@ export async function getSheetTabs(): Promise<SheetTab[]> {
   }));
 }
 
-/** Read all rows from the sheet. Columns: A:Full Address | B:House Number | C:Street | D:Borough | E:Owner Name | F:Billing Name | G:Block | H:Lot | I:Parcel Status | J:Parcel Details | K:Processed */
+/** Read all rows from the sheet. Columns: A:Full Address | B:House# | C:Street | D:Borough | E:Owner | F:Billing | G:Block | H:Lot | I:Parcel Status | J:Parcel Details | K:Processed | L:Estate Status | M:Estate File Number */
 export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
   const auth = getAuth();
   const sheets = google.sheets({ version: "v4", auth });
@@ -48,7 +48,7 @@ export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
 
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId: getSheetId(),
-    range: `${name}!A:K`,
+    range: `${name}!A:M`,
   });
 
   const rows = resp.data.values ?? [];
@@ -67,6 +67,8 @@ export async function readAllRows(sheetName?: string): Promise<SheetRow[]> {
     parcelStatus: row[8] ?? "",
     parcelDetails: row[9] ?? "",
     processed: row[10] ?? "",
+    estateStatus: row[11] ?? "",
+    estateFileNumber: row[12] ?? "",
   }));
 }
 
@@ -75,12 +77,16 @@ export async function getSheetStats(sheetName?: string): Promise<SheetStats> {
   const rows = await readAllRows(sheetName);
   const filled = rows.filter((r) => !!r.processed).length;
   const parcelScanned = rows.filter((r) => !!r.parcelStatus).length;
+  const goodLeads = rows.filter((r) => r.parcelStatus === "GOOD_LEAD");
+  const estateChecked = goodLeads.filter((r) => !!r.estateStatus).length;
   return {
     totalRows: rows.length,
     filledRows: filled,
     emptyRows: rows.length - filled,
     parcelScanned,
     parcelRemaining: rows.length - parcelScanned,
+    estateChecked,
+    estateRemaining: goodLeads.length - estateChecked,
   };
 }
 
@@ -154,6 +160,27 @@ export async function writeParcelResult(
     valueInputOption: "RAW",
     requestBody: {
       values: [[status, details]],
+    },
+  });
+}
+
+/** Write estate check result to columns L and M */
+export async function writeEstateResult(
+  rowIndex: number,
+  status: string,
+  fileNumber: string,
+  sheetName?: string
+): Promise<void> {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const name = resolveSheetName(sheetName);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: getSheetId(),
+    range: `${name}!L${rowIndex}:M${rowIndex}`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[status, fileNumber]],
     },
   });
 }

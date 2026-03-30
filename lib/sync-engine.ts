@@ -1,5 +1,5 @@
 import { NYCPropertyScraper } from "./scraper";
-import { readAllRows, writeRowResult, writeBlockLot } from "./google-sheets";
+import { readAllRows, writeSyncResult } from "./google-sheets";
 import type { SyncProgress } from "./types";
 
 /** In-memory job store — attached to globalThis to survive Next.js dev hot reloads */
@@ -200,10 +200,7 @@ async function runSync(progress: SyncProgress, signal: AbortSignal, options: Syn
       const ownerName = data.owner_name ?? "";
       const billing = data.billing_name ?? "";
 
-      await writeRowResult(row.rowIndex, ownerName, billing, options.sheetName);
-      if (data.block && data.lot) {
-        await writeBlockLot(row.rowIndex, data.block, data.lot, options.sheetName);
-      }
+      await writeSyncResult(row.rowIndex, ownerName, billing, data.block || "", data.lot || "", options.sheetName);
       progress.succeeded++;
       progress.lastCompletedRow = {
         rowIndex: row.rowIndex,

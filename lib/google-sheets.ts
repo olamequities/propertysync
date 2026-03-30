@@ -77,20 +77,84 @@ export async function getSheetStats(sheetName?: string): Promise<SheetStats> {
   const rows = await readAllRows(sheetName);
   const filled = rows.filter((r) => !!r.processed).length;
   const parcelScanned = rows.filter((r) => !!r.parcelStatus).length;
+  const parcelGoodLeads = rows.filter((r) => r.parcelStatus === "GOOD_LEAD").length;
+  const parcelSold = rows.filter((r) => r.parcelStatus === "SOLD").length;
+  const parcelNoReverse = rows.filter((r) => r.parcelStatus === "NO_REVERSE_MORTGAGE").length;
+  const parcelSatisfied = rows.filter((r) => r.parcelStatus === "SATISFIED").length;
+  const parcelError = rows.filter((r) => r.parcelStatus === "ERROR").length;
   const goodLeads = rows.filter((r) => r.parcelStatus === "GOOD_LEAD");
   const estateChecked = goodLeads.filter((r) => !!r.estateStatus).length;
+  const estateYes = goodLeads.filter((r) => r.estateStatus === "YES").length;
+  const estateNo = goodLeads.filter((r) => r.estateStatus === "NO").length;
   return {
     totalRows: rows.length,
     filledRows: filled,
     emptyRows: rows.length - filled,
     parcelScanned,
     parcelRemaining: rows.length - parcelScanned,
+    parcelGoodLeads,
+    parcelSold,
+    parcelNoReverse,
+    parcelSatisfied,
+    parcelError,
     estateChecked,
     estateRemaining: goodLeads.length - estateChecked,
+    estateYes,
+    estateNo,
   };
 }
 
-/** Write owner name, billing info, and mark as processed */
+/** Retry wrapper for Google Sheets API calls — handles rate limiting */
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const msg = err?.message || "";
+      const isRateLimit = msg.includes("Quota exceeded") || msg.includes("429") || err?.code === 429;
+      if (isRateLimit && attempt < maxRetries) {
+        const delay = (attempt + 1) * 15000; // 15s, 30s, 45s
+        console.log(`[sheets] Rate limited. Waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("withRetry: should not reach here");
+}
+
+/** Write owner, billing, block, lot, and processed in ONE API call */
+export async function writeSyncResult(
+  rowIndex: number,
+  ownerName: string,
+  billing: string,
+  block: string,
+  lot: string,
+  sheetName?: string
+): Promise<void> {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: "v4", auth });
+  const name = resolveSheetName(sheetName);
+
+  const data: Array<{ range: string; values: string[][] }> = [
+    { range: `${name}!E${rowIndex}:F${rowIndex}`, values: [[ownerName, billing]] },
+    { range: `${name}!K${rowIndex}`, values: [[new Date().toISOString()]] },
+  ];
+
+  if (block && lot) {
+    data.push({ range: `${name}!G${rowIndex}:H${rowIndex}`, values: [[block, lot]] });
+  }
+
+  await withRetry(() =>
+    sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: getSheetId(),
+      requestBody: { valueInputOption: "RAW", data },
+    })
+  );
+}
+
+/** Write owner, billing, and processed timestamp (legacy, used by parcel engine) */
 export async function writeRowResult(
   rowIndex: number,
   ownerName: string,
@@ -101,25 +165,18 @@ export async function writeRowResult(
   const sheets = google.sheets({ version: "v4", auth });
   const name = resolveSheetName(sheetName);
 
-  // Write owner + billing to E:F
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: getSheetId(),
-    range: `${name}!E${rowIndex}:F${rowIndex}`,
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[ownerName, billingNameAndAddress]],
-    },
-  });
-
-  // Write processed timestamp to K
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: getSheetId(),
-    range: `${name}!K${rowIndex}`,
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[new Date().toISOString()]],
-    },
-  });
+  await withRetry(() =>
+    sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: getSheetId(),
+      requestBody: {
+        valueInputOption: "RAW",
+        data: [
+          { range: `${name}!E${rowIndex}:F${rowIndex}`, values: [[ownerName, billingNameAndAddress]] },
+          { range: `${name}!K${rowIndex}`, values: [[new Date().toISOString()]] },
+        ],
+      },
+    })
+  );
 }
 
 /** Write block and lot values to columns G and H */
@@ -133,14 +190,14 @@ export async function writeBlockLot(
   const sheets = google.sheets({ version: "v4", auth });
   const name = resolveSheetName(sheetName);
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: getSheetId(),
-    range: `${name}!G${rowIndex}:H${rowIndex}`,
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[block, lot]],
-    },
-  });
+  await withRetry(() =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: getSheetId(),
+      range: `${name}!G${rowIndex}:H${rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [[block, lot]] },
+    })
+  );
 }
 
 /** Write parcel analysis result to columns I and J */
@@ -154,14 +211,14 @@ export async function writeParcelResult(
   const sheets = google.sheets({ version: "v4", auth });
   const name = resolveSheetName(sheetName);
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: getSheetId(),
-    range: `${name}!I${rowIndex}:J${rowIndex}`,
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[status, details]],
-    },
-  });
+  await withRetry(() =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: getSheetId(),
+      range: `${name}!I${rowIndex}:J${rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [[status, details]] },
+    })
+  );
 }
 
 /** Write estate check result to columns L and M */
@@ -175,14 +232,14 @@ export async function writeEstateResult(
   const sheets = google.sheets({ version: "v4", auth });
   const name = resolveSheetName(sheetName);
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: getSheetId(),
-    range: `${name}!L${rowIndex}:M${rowIndex}`,
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[status, fileNumber]],
-    },
-  });
+  await withRetry(() =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: getSheetId(),
+      range: `${name}!L${rowIndex}:M${rowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [[status, fileNumber]] },
+    })
+  );
 }
 
 /** Count rows that have block/lot but no parcelStatus */

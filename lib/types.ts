@@ -38,8 +38,15 @@ export interface SheetStats {
   emptyRows: number;
   parcelScanned: number;
   parcelRemaining: number;
+  parcelGoodLeads: number;
+  parcelSold: number;
+  parcelNoReverse: number;
+  parcelSatisfied: number;
+  parcelError: number;
   estateChecked: number;
   estateRemaining: number;
+  estateYes: number;
+  estateNo: number;
 }
 
 export interface SheetTab {

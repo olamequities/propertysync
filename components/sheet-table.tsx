@@ -5,6 +5,7 @@ import type { SheetRow } from "@/lib/types";
 
 type ParcelFilter = "ALL" | "GOOD_LEAD" | "SOLD" | "NO_REVERSE_MORTGAGE" | "SATISFIED" | "ERROR" | "PENDING";
 type SyncFilter = "ALL" | "SYNCED" | "UNSYNCED";
+type EstateFilter = "ALL" | "YES" | "NO" | "PENDING";
 
 interface SheetTableProps {
   rows: SheetRow[];
@@ -54,6 +55,13 @@ const SYNC_FILTER_OPTIONS: { value: SyncFilter; label: string }[] = [
   { value: "UNSYNCED", label: "Unsynced" },
 ];
 
+const ESTATE_FILTER_OPTIONS: { value: EstateFilter; label: string }[] = [
+  { value: "ALL", label: "All" },
+  { value: "YES", label: "Has Estate" },
+  { value: "NO", label: "No Estate" },
+  { value: "PENDING", label: "Pending" },
+];
+
 function exportCSV(rows: SheetRow[], filename: string) {
   const headers = ["Full Address", "House Number", "Street", "Borough", "Owner Name", "Billing Name", "Block", "Lot", "Parcel Status", "Parcel Details", "Estate Status", "Estate File Number"];
   const csvRows = [
@@ -88,6 +96,7 @@ export default function SheetTable({
   // Filter state
   const [parcelFilter, setParcelFilter] = useState<ParcelFilter>("ALL");
   const [syncFilter, setSyncFilter] = useState<SyncFilter>("ALL");
+  const [estateFilter, setEstateFilter] = useState<EstateFilter>("ALL");
   const [searchText, setSearchText] = useState("");
 
   const filteredRows = useMemo(() => {
@@ -107,6 +116,14 @@ export default function SheetTable({
       result = result.filter((r) => !r.processed);
     }
 
+    if (estateFilter === "YES") {
+      result = result.filter((r) => r.estateStatus === "YES");
+    } else if (estateFilter === "NO") {
+      result = result.filter((r) => r.estateStatus === "NO");
+    } else if (estateFilter === "PENDING") {
+      result = result.filter((r) => r.parcelStatus === "GOOD_LEAD" && !r.estateStatus);
+    }
+
     if (searchText.trim()) {
       const q = searchText.toLowerCase();
       result = result.filter((r) =>
@@ -119,9 +136,9 @@ export default function SheetTable({
     }
 
     return result;
-  }, [rows, parcelFilter, syncFilter, searchText]);
+  }, [rows, parcelFilter, syncFilter, estateFilter, searchText]);
 
-  const isFiltered = parcelFilter !== "ALL" || syncFilter !== "ALL" || searchText.trim() !== "";
+  const isFiltered = parcelFilter !== "ALL" || syncFilter !== "ALL" || estateFilter !== "ALL" || searchText.trim() !== "";
 
   // Virtualization state
   const [scrollTop, setScrollTop] = useState(0);
@@ -295,6 +312,20 @@ export default function SheetTable({
             className="px-2 py-1 bg-surface border border-border rounded text-[11px] text-foreground focus:outline-none focus:border-accent transition-colors cursor-pointer"
           >
             {PARCEL_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Estate filter */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Estate:</span>
+          <select
+            value={estateFilter}
+            onChange={(e) => setEstateFilter(e.target.value as EstateFilter)}
+            className="px-2 py-1 bg-surface border border-border rounded text-[11px] text-foreground focus:outline-none focus:border-accent transition-colors cursor-pointer"
+          >
+            {ESTATE_FILTER_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>

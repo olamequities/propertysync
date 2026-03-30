@@ -53,6 +53,33 @@ def search_estate(sb, court_id, last_name, first_name):
         sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
         sb.sleep(2)
 
+        # Check if session expired or captcha popped up again
+        current = sb.get_current_url()
+        if "Authenticate" in current or "Welcome" in current or "NameSearch" not in current:
+            print("\n  ** Session expired! Solve CAPTCHA in the browser. **")
+            # Navigate fresh
+            sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
+            sb.sleep(3)
+            if "Welcome" in sb.get_current_url():
+                try:
+                    sb.click("button:contains('Start Search')")
+                    sb.sleep(3)
+                except Exception:
+                    pass
+            # Wait for user to solve captcha (up to 5 min)
+            for wait in range(60):
+                current = sb.get_current_url()
+                if "Authenticate" not in current and "Welcome" not in current:
+                    print("  ** Session restored! Continuing... **")
+                    sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
+                    sb.sleep(2)
+                    break
+                time.sleep(5)
+                if wait % 6 == 0:
+                    print(f"  Waiting for CAPTCHA... ({wait * 5}s)")
+            else:
+                return {"found": False, "error": "Session expired — CAPTCHA timeout"}
+
         if not sb.is_element_present("#CourtSelect"):
             return {"found": False, "error": "Search page not available"}
 
@@ -69,23 +96,40 @@ def search_estate(sb, court_id, last_name, first_name):
         if "No Matching Files Were Found" in source:
             return {"found": False}
 
-        # Extract file numbers
+        # Check if there are actual results
+        if "Results 1" not in source and "File #" not in source:
+            return {"found": False}
+
+        # File numbers are inside <button> elements with class "ButtonAsLink"
+        # e.g. <button name="button" class="ButtonAsLink" value="2017-103" type="submit">2017-103</button>
         file_numbers = []
         try:
-            rows = sb.find_elements("table tr")
-            for row in rows[1:]:
+            buttons = sb.find_elements("button.ButtonAsLink")
+            for btn in buttons:
                 try:
-                    cells = row.find_elements("css selector", "td")
-                    if cells and len(cells) > 0:
-                        file_num = cells[0].text.strip() if cells[0].text else ""
-                        if file_num:
-                            file_numbers.append(file_num)
+                    text = btn.text.strip()
+                    # File numbers look like "2017-103" or "2017-103/A"
+                    if text and "-" in text and len(text) < 20:
+                        file_numbers.append(text)
                 except Exception:
                     continue
+
+            # Fallback: try table cells
+            if not file_numbers:
+                rows = sb.find_elements("#NameResultsTable tbody tr")
+                for row in rows:
+                    try:
+                        cells = row.find_elements("css selector", "td")
+                        if cells:
+                            file_num = cells[0].text.strip()
+                            if file_num and "-" in file_num:
+                                file_numbers.append(file_num)
+                    except Exception:
+                        continue
         except Exception:
             pass
 
-        # Deduplicate file numbers
+        # Deduplicate
         seen = set()
         unique = []
         for fn in file_numbers:
@@ -115,7 +159,9 @@ def main():
             from googleapiclient.discovery import build
 
             email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
-            key = os.environ.get("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY", "").replace("\\n", "\n")
+            key = os.environ.get("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY", "")
+            # Strip surrounding quotes and convert escaped newlines
+            key = key.strip('"').strip("'").replace("\\n", "\n")
             sheet_id = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
             sheet_name = sheet_name or os.environ.get("GOOGLE_SHEETS_SHEET_NAME", "Sheet1")
 
@@ -133,9 +179,27 @@ def main():
                 while len(row) < 13:
                     row.append("")
                 if row[8] == "GOOD_LEAD" and not row[11]:
-                    parts = row[4].split(",", 1)
-                    last_name = parts[0].strip()
-                    first_name = parts[1].strip() if len(parts) > 1 else ""
+                    owner = row[4].strip()
+                    if "," in owner:
+                        # "LIRIANO, MARIA N" → last=LIRIANO, first=MARIA
+                        parts = owner.split(",", 1)
+                        last_name = parts[0].strip()
+                        first_words = parts[1].strip().split() if len(parts) > 1 else []
+                        first_name = first_words[0] if first_words else ""
+                    else:
+                        # No comma — "BEVERLY J JONES" or "REYNOLDS JOHN H"
+                        # Filter out single-letter middle initials
+                        words = owner.split()
+                        meaningful = [w for w in words if len(w) > 1]
+                        if len(meaningful) >= 2:
+                            first_name = meaningful[0]
+                            last_name = meaningful[-1]
+                        elif len(words) >= 2:
+                            first_name = words[0]
+                            last_name = words[-1]
+                        else:
+                            last_name = owner
+                            first_name = ""
                     court = BOROUGH_TO_COURT.get(row[3].lower().strip(), "3")
                     searches.append({
                         "rowIndex": i,
@@ -208,7 +272,8 @@ def main():
                 from googleapiclient.discovery import build
 
                 email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL", "")
-                key = os.environ.get("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY", "").replace("\\n", "\n")
+                key = os.environ.get("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY", "")
+                key = key.strip('"').strip("'").replace("\\n", "\n")
                 sheet_id = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 
                 creds = service_account.Credentials.from_service_account_info(
@@ -229,6 +294,12 @@ def main():
 
             try:
                 result = search_estate(sb, s["courtId"], s["lastName"], s.get("firstName", ""))
+
+                # If no results and name had no comma, try swapping first/last
+                if not result.get("found") and s.get("firstName"):
+                    print("retrying swapped...", end=" ", flush=True)
+                    result = search_estate(sb, s["courtId"], s["firstName"], s["lastName"])
+
                 status = "YES" if result.get("found") else "NO"
                 file_nums = "; ".join(result.get("fileNumbers", [])[:5])
 

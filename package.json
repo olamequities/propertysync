@@ -1,6 +1,8 @@
 {
   "name": "olam-app",
   "version": "1.1.0",
+  "description": "NYC property owner lookup, reverse mortgage lead detection, and estate search",
+  "author": "Olam Equities",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -19,6 +21,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "cheerio": "^1.0.0",
+    "electron-updater": "^6.8.3",
     "googleapis": "^144.0.0",
     "jose": "^6.0.0",
     "next": "^15.3.0",
@@ -51,21 +54,31 @@
       {
         "from": ".next/standalone",
         "to": "app",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": ".next/static",
         "to": "app/.next/static",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "public",
         "to": "app/public",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "scripts/estate-scanner.py",
         "to": "scripts/estate-scanner.py"
+      },
+      {
+        "from": ".env.local",
+        "to": ".env.local"
       }
     ],
     "publish": {
@@ -74,19 +87,24 @@
       "repo": "olam-app"
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "public/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
-      "icon": "public/icon.icns",
+      "target": [
+        "dmg"
+      ],
+      "icon": "public/icon.png",
       "category": "public.app-category.business"
     },
     "nsis": {
-      "oneClick": true,
-      "allowToChangeInstallationDirectory": false,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "PropScope"
     }
   }
 }

@@ -563,20 +563,28 @@ export default function Dashboard() {
                 <div className="w-2 h-2 rounded-full bg-purple-500" />
                 <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Parcel Scan</p>
               </div>
-              <div className="grid grid-cols-3 gap-3 mb-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Total</p>
-                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.totalRows}</p>
-                </div>
+              <div className="grid grid-cols-3 gap-3 mb-2">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Scanned</p>
-                  <p className="text-xl font-semibold text-green tabular-nums">{stats.parcelScanned}</p>
+                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.parcelScanned}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Remaining</p>
                   <p className="text-xl font-semibold text-warning tabular-nums">{stats.parcelRemaining}</p>
                 </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Good Leads</p>
+                  <p className="text-xl font-semibold text-green tabular-nums">{stats.parcelGoodLeads}</p>
+                </div>
               </div>
+              {stats.parcelScanned > 0 && (
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] mb-3">
+                  <span className="text-danger">{stats.parcelSold} sold</span>
+                  <span className="text-muted">{stats.parcelNoReverse} no rev. mtg</span>
+                  <span className="text-warning">{stats.parcelSatisfied} satisfied</span>
+                  {stats.parcelError > 0 && <span className="text-danger">{stats.parcelError} errors</span>}
+                </div>
+              )}
               <div className="flex items-center gap-3">
                 <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
                   <div
@@ -596,7 +604,7 @@ export default function Dashboard() {
                 <div className="w-2 h-2 rounded-full bg-amber-500" />
                 <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Estate Check</p>
               </div>
-              <div className="grid grid-cols-3 gap-3 mb-3">
+              <div className="grid grid-cols-3 gap-3 mb-2">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Good Leads</p>
                   <p className="text-xl font-semibold text-foreground tabular-nums">{stats.estateChecked + stats.estateRemaining}</p>
@@ -610,6 +618,12 @@ export default function Dashboard() {
                   <p className="text-xl font-semibold text-warning tabular-nums">{stats.estateRemaining}</p>
                 </div>
               </div>
+              {stats.estateChecked > 0 && (
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] mb-3">
+                  <span className="text-green font-medium">{stats.estateYes} with estate</span>
+                  <span className="text-muted">{stats.estateNo} no estate</span>
+                </div>
+              )}
               <div className="flex items-center gap-3">
                 <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
                   <div

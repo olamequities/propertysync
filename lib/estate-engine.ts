@@ -108,9 +108,34 @@ export async function getEstateSearchList(sheetName?: string): Promise<Array<{
   );
 
   return goodLeads.map((r) => {
-    const parts = r.ownerName.split(",", 2);
-    const lastName = parts[0]?.trim() || r.ownerName.trim();
-    const firstName = parts[1]?.trim() || "";
+    let lastName = "";
+    let firstName = "";
+
+    if (r.ownerName.includes(",")) {
+      // "LIRIANO, MARIA N" → last=LIRIANO, first=MARIA
+      const parts = r.ownerName.split(",", 2);
+      lastName = parts[0]?.trim() || "";
+      // Take only the first word of the first name (drop middle initial)
+      const firstParts = (parts[1]?.trim() || "").split(/\s+/);
+      firstName = firstParts[0] || "";
+    } else {
+      // No comma — could be "LAST FIRST [MIDDLE]" or "FIRST [MIDDLE] LAST"
+      // Filter out single-letter middle initials, then use first and last word
+      const words = r.ownerName.trim().split(/\s+/);
+      const meaningful = words.filter(w => w.length > 1);
+      if (meaningful.length >= 2) {
+        // Use first word and last meaningful word
+        // Try last meaningful word as last name, first meaningful word as first name
+        firstName = meaningful[0];
+        lastName = meaningful[meaningful.length - 1];
+      } else if (words.length >= 2) {
+        firstName = words[0];
+        lastName = words[words.length - 1];
+      } else {
+        lastName = r.ownerName.trim();
+      }
+    }
+
     const courtId = BOROUGH_TO_COURT[r.borough.toLowerCase().trim()] || "3";
 
     return {

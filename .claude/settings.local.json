@@ -123,7 +123,10 @@
       "Bash(pkill -f \"node.*next\")",
       "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx next build 2>&1 | tail -20')",
       "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx tsc --noEmit --pretty false 2>&1 | head -20')",
-      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npm install electron-updater 2>&1 | tail -3')"
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npm install electron-updater 2>&1 | tail -3')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && rm -rf .next && npm run build 2>&1')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && node -e \"\nconst fs = require\\(\\\\\"fs\\\\\"\\);\nconst { execSync } = require\\(\\\\\"child_process\\\\\"\\);\n\n// Read the SVG\nconst svg = fs.readFileSync\\(\\\\\"public/favicon.svg\\\\\", \\\\\"utf-8\\\\\"\\);\n\n// Create a 256x256 PNG using sharp if available, otherwise use a canvas approach\ntry {\n  const sharp = require\\(\\\\\"sharp\\\\\"\\);\n  sharp\\(Buffer.from\\(svg\\)\\)\n    .resize\\(256, 256\\)\n    .png\\(\\)\n    .toFile\\(\\\\\"public/icon.png\\\\\"\\)\n    .then\\(\\(\\) => console.log\\(\\\\\"PNG created\\\\\"\\)\\);\n} catch\\(e\\) {\n  console.log\\(\\\\\"sharp not available:\\\\\", e.message\\);\n}\n\" 2>&1')",
+      "Bash(bash -c 'source \"$HOME/.nvm/nvm.sh\" && nvm use 22 && npx tsc --noEmit 2>&1 | head -10')"
     ]
   }
 }

@@ -119,15 +119,15 @@ export async function getEstateSearchList(sheetName?: string): Promise<Array<{
       const firstParts = (parts[1]?.trim() || "").split(/\s+/);
       firstName = firstParts[0] || "";
     } else {
-      // No comma — could be "LAST FIRST [MIDDLE]" or "FIRST [MIDDLE] LAST"
-      // Filter out single-letter middle initials, then use first and last word
+      // No comma — filter out single-letter initials AND name suffixes
+      const suffixes = new Set(["JR", "SR", "II", "III", "IV", "ESQ"]);
       const words = r.ownerName.trim().split(/\s+/);
-      const meaningful = words.filter(w => w.length > 1);
+      const meaningful = words.filter(w => w.length > 1 && !suffixes.has(w.toUpperCase()));
       if (meaningful.length >= 2) {
-        // Use first word and last meaningful word
-        // Try last meaningful word as last name, first meaningful word as first name
         firstName = meaningful[0];
         lastName = meaningful[meaningful.length - 1];
+      } else if (meaningful.length === 1) {
+        lastName = meaningful[0];
       } else if (words.length >= 2) {
         firstName = words[0];
         lastName = words[words.length - 1];

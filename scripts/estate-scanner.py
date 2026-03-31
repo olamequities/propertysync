@@ -50,13 +50,37 @@ def api_post(path, data):
 def search_estate(sb, court_id, last_name, first_name):
     """Search surrogate court for estate proceedings."""
     try:
-        sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
-        sb.sleep(2)
+        # If already on results page, click "New Search" instead of full reload
+        current = sb.get_current_url()
+        if "NameSearch" in current:
+            try:
+                new_search_btn = sb.find_elements("button.ButtonAsLink")
+                for btn in new_search_btn:
+                    if "Reset" in (btn.get_attribute("value") or ""):
+                        btn.click()
+                        sb.sleep(1)
+                        break
+                else:
+                    sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
+                    sb.sleep(1)
+            except Exception:
+                sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
+                sb.sleep(1)
+        else:
+            sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
+            sb.sleep(2)
 
         # Check if session expired or captcha popped up again
         current = sb.get_current_url()
         if "Authenticate" in current or "Welcome" in current or "NameSearch" not in current:
-            print("\n  ** Session expired! Solve CAPTCHA in the browser. **")
+            print("\n  ****************************************************")
+            print("  **  CAPTCHA REQUIRED — Solve it in the browser!   **")
+            print("  ****************************************************")
+            # Bring browser to front
+            try:
+                sb.driver.maximize_window()
+            except Exception:
+                pass
             # Navigate fresh
             sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
             sb.sleep(3)
@@ -70,7 +94,7 @@ def search_estate(sb, court_id, last_name, first_name):
             for wait in range(60):
                 current = sb.get_current_url()
                 if "Authenticate" not in current and "Welcome" not in current:
-                    print("  ** Session restored! Continuing... **")
+                    print("  ** CAPTCHA solved! Continuing... **")
                     sb.open("https://websurrogates.nycourts.gov/Names/NameSearch")
                     sb.sleep(2)
                     break
@@ -84,13 +108,10 @@ def search_estate(sb, court_id, last_name, first_name):
             return {"found": False, "error": "Search page not available"}
 
         sb.select_option_by_value("#CourtSelect", court_id)
-        sb.clear("#LastNameBox")
-        sb.type("#LastNameBox", last_name)
-        sb.clear("#FirstNameBox")
-        if first_name:
-            sb.type("#FirstNameBox", first_name)
+        sb.execute_script(f'document.getElementById("LastNameBox").value = "{last_name}";')
+        sb.execute_script(f'document.getElementById("FirstNameBox").value = "{first_name}";')
         sb.click("#NameSearchSubmitName")
-        sb.sleep(3)
+        sb.sleep(2)
 
         source = sb.get_page_source()
         if "No Matching Files Were Found" in source:
@@ -187,13 +208,16 @@ def main():
                         first_words = parts[1].strip().split() if len(parts) > 1 else []
                         first_name = first_words[0] if first_words else ""
                     else:
-                        # No comma — "BEVERLY J JONES" or "REYNOLDS JOHN H"
-                        # Filter out single-letter middle initials
+                        # No comma — filter out initials AND suffixes (JR, SR, etc.)
+                        suffixes = {"JR", "SR", "II", "III", "IV", "ESQ"}
                         words = owner.split()
-                        meaningful = [w for w in words if len(w) > 1]
+                        meaningful = [w for w in words if len(w) > 1 and w.upper() not in suffixes]
                         if len(meaningful) >= 2:
                             first_name = meaningful[0]
                             last_name = meaningful[-1]
+                        elif len(meaningful) == 1:
+                            last_name = meaningful[0]
+                            first_name = ""
                         elif len(words) >= 2:
                             first_name = words[0]
                             last_name = words[-1]
@@ -284,8 +308,23 @@ def main():
             except:
                 pass
 
+        def is_browser_alive(sb):
+            """Check if browser window is still open."""
+            try:
+                sb.get_current_url()
+                return True
+            except Exception:
+                return False
+
         found_count = 0
+        cancelled = False
         for i, s in enumerate(searches):
+            # Check if browser was closed
+            if not is_browser_alive(sb):
+                print("\n\nBrowser window closed — cancelling.")
+                cancelled = True
+                break
+
             name = f"{s['lastName']}, {s['firstName']}" if s.get("firstName") else s["lastName"]
             print(f"\n[{i+1}/{len(searches)}] {name} ({s['borough']})...", end=" ", flush=True)
 
@@ -296,7 +335,7 @@ def main():
                 result = search_estate(sb, s["courtId"], s["lastName"], s.get("firstName", ""))
 
                 # If no results and name had no comma, try swapping first/last
-                if not result.get("found") and s.get("firstName"):
+                if not result.get("found") and s.get("firstName") and is_browser_alive(sb):
                     print("retrying swapped...", end=" ", flush=True)
                     result = search_estate(sb, s["courtId"], s["firstName"], s["lastName"])
 
@@ -329,17 +368,21 @@ def main():
                     ).execute()
 
             except Exception as e:
+                msg = str(e)
+                # Browser closed mid-search
+                if "no such window" in msg.lower() or "not reachable" in msg.lower() or "session" in msg.lower():
+                    print("\n\nBrowser closed — cancelling.")
+                    cancelled = True
+                    break
                 print(f"ERROR: {e}")
                 if job_id:
                     api_post(f"/api/estate/{job_id}", {
                         "action": "result",
                         "rowIndex": s["rowIndex"],
                         "estateStatus": "ERROR",
-                        "fileNumber": str(e)[:100],
+                        "fileNumber": msg[:100],
                         "sheetName": sheet_name,
                     })
-
-            time.sleep(1)
 
         # Complete
         if job_id:

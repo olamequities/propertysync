@@ -16,8 +16,18 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
         run: npm ci
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller seleniumbase google-api-python-client google-auth
+
+      - name: Build estate scanner exe
+        run: pyinstaller --onefile --name estate-scanner --distpath electron/bin scripts/estate-scanner.py
 
       - name: Build Next.js
         run: npm run build
@@ -43,8 +53,18 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
         run: npm ci
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller seleniumbase google-api-python-client google-auth
+
+      - name: Build estate scanner binary
+        run: pyinstaller --onefile --name estate-scanner --distpath electron/bin scripts/estate-scanner.py
 
       - name: Build Next.js
         run: npm run build

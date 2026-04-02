@@ -10,9 +10,10 @@
     "build": "next build",
     "start": "next start",
     "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "electron:build": "next build && electron-builder --win --mac",
-    "electron:build:win": "next build && electron-builder --win",
-    "electron:build:mac": "next build && electron-builder --mac",
+    "estate:build": "py -m PyInstaller --onefile --name estate-scanner --distpath electron/bin scripts/estate-scanner.py",
+    "electron:build": "npm run estate:build && next build && electron-builder --win --mac",
+    "electron:build:win": "npm run estate:build && next build && electron-builder --win",
+    "electron:build:mac": "npm run estate:build && next build && electron-builder --mac",
     "electron:start": "electron ."
   },
   "dependencies": {
@@ -73,8 +74,9 @@
         ]
       },
       {
-        "from": "scripts/estate-scanner.py",
-        "to": "scripts/estate-scanner.py"
+        "from": "electron/bin/",
+        "to": "bin/",
+        "filter": ["estate-scanner*"]
       },
       {
         "from": ".env.local",

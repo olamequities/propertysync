@@ -22,20 +22,20 @@ autoUpdater.on("checking-for-update", () => {
 autoUpdater.on("update-available", (info) => {
   console.log("[updater] Update available:", info.version);
   const win = mainWindow || splashWindow;
-  if (win) {
+  if (win && !win.isDestroyed()) {
     dialog.showMessageBox(win, {
       type: "info",
       title: "Update Available",
-      message: `Version ${info.version} is downloading in the background. You'll be notified when it's ready.`,
+      message: `Version ${info.version} is downloading in the background.`,
       buttons: ["OK"],
-    });
+    }).catch(() => {});
   }
 });
 
 autoUpdater.on("download-progress", (progress) => {
   const pct = Math.round(progress.percent);
   console.log(`[updater] Downloading: ${pct}%`);
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(progress.percent / 100);
     mainWindow.setTitle(`PropScope — Downloading update ${pct}%`);
   }
@@ -43,12 +43,17 @@ autoUpdater.on("download-progress", (progress) => {
 
 autoUpdater.on("update-downloaded", (info) => {
   console.log("[updater] Update downloaded:", info.version);
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(-1);
     mainWindow.setTitle("PropScope");
   }
+  const win = mainWindow || splashWindow;
+  if (!win || win.isDestroyed()) {
+    autoUpdater.quitAndInstall();
+    return;
+  }
   dialog
-    .showMessageBox(mainWindow || splashWindow, {
+    .showMessageBox(win, {
       type: "info",
       title: "Update Ready",
       message: `Version ${info.version} is ready to install. Restart now?`,
@@ -59,7 +64,8 @@ autoUpdater.on("update-downloaded", (info) => {
       if (result.response === 0) {
         autoUpdater.quitAndInstall();
       }
-    });
+    })
+    .catch(() => {});
 });
 
 autoUpdater.on("update-not-available", () => {
@@ -68,7 +74,7 @@ autoUpdater.on("update-not-available", () => {
 
 autoUpdater.on("error", (err) => {
   console.error("[updater] Error:", err.message);
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(-1);
     mainWindow.setTitle("PropScope");
   }
@@ -77,7 +83,6 @@ autoUpdater.on("error", (err) => {
 // ─── Next.js Server ─────────────────────────────────────────
 function findNextServer() {
   if (isDev) return null;
-
 
   const candidates = [
     path.join(process.resourcesPath, "app", "server.js"),
@@ -103,19 +108,27 @@ function findNextServer() {
     return null;
   }
 
-  return findFile(path.join(process.resourcesPath, "app"), "server.js");
+  const found = findFile(path.join(process.resourcesPath, "app"), "server.js");
+  if (!found) {
+    console.error("[next] Could not find server.js. Checked:", candidates.join(", "));
+  }
+  return found;
 }
 
 function startNextServer() {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const doResolve = () => { if (!settled) { settled = true; clearTimeout(fallbackTimeout); resolve(); } };
+    const doReject = (err) => { if (!settled) { settled = true; clearTimeout(fallbackTimeout); reject(err); } };
+
     if (isDev) {
-      resolve();
+      doResolve();
       return;
     }
 
     const serverPath = findNextServer();
     if (!serverPath) {
-      reject(new Error("Could not find Next.js server"));
+      doReject(new Error("Could not find Next.js server"));
       return;
     }
 
@@ -136,28 +149,28 @@ function startNextServer() {
       if (fs.existsSync(envPath)) {
         console.log("[env] Loading", envPath);
         const content = fs.readFileSync(envPath, "utf-8");
-        // Parse .env handling quoted values (including multiline-safe private keys)
-        const regex = /^([A-Z_][A-Z0-9_]*)\s*=\s*(.*)/gm;
+        const regex = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)/gm;
         let match;
         while ((match = regex.exec(content)) !== null) {
           const key = match[1];
           let val = match[2].trim();
-          // Strip surrounding quotes
           if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
             val = val.slice(1, -1);
           }
           env[key] = val;
         }
-        console.log("[env] Loaded keys:", Object.keys(env).filter(k => k.startsWith("GOOGLE") || k.startsWith("AUTH") || k.startsWith("JWT")).join(", "));
+        console.log("[env] Loaded keys:", Object.keys(env).filter(k =>
+          k.startsWith("GOOGLE") || k.startsWith("AUTH") || k.startsWith("JWT")
+        ).join(", "));
         break;
       }
     }
 
-    console.log("[next] Starting server from:", serverPath);
-    console.log("[next] CWD:", path.dirname(serverPath));
-
-    // Also copy .env.local next to server.js so Next.js can read it natively
     const serverDir = path.dirname(serverPath);
+    console.log("[next] Starting server from:", serverPath);
+    console.log("[next] CWD:", serverDir);
+
+    // Copy .env.local next to server.js so Next.js reads it natively
     for (const envPath of envPaths) {
       if (fs.existsSync(envPath)) {
         const destEnv = path.join(serverDir, ".env.local");
@@ -177,7 +190,7 @@ function startNextServer() {
     const staticSrc = path.join(process.resourcesPath, "app", ".next", "static");
     const staticDest = path.join(serverDir, ".next", "static");
     if (fs.existsSync(staticSrc) && !fs.existsSync(staticDest)) {
-      console.log("[next] Linking static files...");
+      console.log("[next] Copying static files...");
       fs.mkdirSync(path.join(serverDir, ".next"), { recursive: true });
       fs.cpSync(staticSrc, staticDest, { recursive: true });
     }
@@ -185,45 +198,52 @@ function startNextServer() {
     const publicSrc = path.join(process.resourcesPath, "app", "public");
     const publicDest = path.join(serverDir, "public");
     if (fs.existsSync(publicSrc) && !fs.existsSync(publicDest)) {
-      console.log("[next] Linking public files...");
+      console.log("[next] Copying public files...");
       fs.cpSync(publicSrc, publicDest, { recursive: true });
     }
 
-    nextServer = spawn("node", [serverPath], {
-      env,
-      stdio: "pipe",
-      cwd: serverDir,
-    });
+    // Use Electron's bundled Node binary instead of system "node"
+    const nodeBin = process.execPath;
+    try {
+      nextServer = spawn(nodeBin, [serverPath], {
+        env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+        stdio: "pipe",
+        cwd: serverDir,
+      });
+    } catch (err) {
+      doReject(new Error(`Failed to spawn server: ${err.message}`));
+      return;
+    }
 
     nextServer.stdout.on("data", (data) => {
       const msg = data.toString();
-      console.log("[next]", msg);
+      console.log("[next]", msg.trim());
       if (msg.includes("Ready") || msg.includes("started") || msg.includes("listening")) {
-        resolve();
+        doResolve();
       }
     });
 
     nextServer.stderr.on("data", (data) => {
-      console.error("[next:err]", data.toString());
+      console.error("[next:err]", data.toString().trim());
     });
 
     nextServer.on("error", (err) => {
       console.error("[next] Failed to start:", err.message);
-      reject(err);
+      doReject(err);
     });
 
     nextServer.on("exit", (code) => {
       console.log(`[next] Server exited with code ${code}`);
       if (code !== 0 && code !== null) {
-        reject(new Error(`Next.js server exited with code ${code}`));
+        doReject(new Error(`Next.js server exited with code ${code}`));
       }
     });
 
-    // Fallback: resolve after 8s
-    setTimeout(() => {
+    // Fallback: resolve after 10s
+    const fallbackTimeout = setTimeout(() => {
       console.log("[next] Timeout fallback — assuming server is ready");
-      resolve();
-    }, 8000);
+      doResolve();
+    }, 10000);
   });
 }
 
@@ -301,16 +321,17 @@ function createWindow() {
 
   mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
 
-  // Show main window when ready, or after 8s timeout
   let shown = false;
   function showMainWindow() {
     if (shown) return;
     shown = true;
-    if (splashWindow) {
+    if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.close();
       splashWindow = null;
     }
-    mainWindow.show();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
   }
 
   mainWindow.once("ready-to-show", showMainWindow);
@@ -322,6 +343,19 @@ function createWindow() {
   });
 }
 
+// ─── Kill server safely ─────────────────────────────────────
+function killServer() {
+  if (!nextServer) return;
+  try {
+    nextServer.kill("SIGTERM");
+    const forceKill = setTimeout(() => {
+      try { nextServer.kill("SIGKILL"); } catch {}
+    }, 5000);
+    nextServer.once("exit", () => clearTimeout(forceKill));
+  } catch {}
+  nextServer = null;
+}
+
 // ─── App lifecycle ──────────────────────────────────────────
 app.whenReady().then(async () => {
   try {
@@ -330,23 +364,23 @@ app.whenReady().then(async () => {
     await waitForPort(PORT);
     createWindow();
 
-    // Check for updates (production only)
     if (!isDev) {
       autoUpdater.checkForUpdatesAndNotify();
     }
   } catch (err) {
+    killServer();
     dialog.showErrorBox("Startup Error", `Failed to start: ${err.message}`);
     app.quit();
   }
 });
 
 app.on("window-all-closed", () => {
-  if (nextServer) nextServer.kill();
+  killServer();
   app.quit();
 });
 
 app.on("before-quit", () => {
-  if (nextServer) nextServer.kill();
+  killServer();
 });
 
 app.on("activate", () => {

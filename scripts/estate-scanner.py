@@ -31,20 +31,28 @@ API_BASE = os.environ.get("PORTAL_URL", "http://localhost:3000")
 AUTH_COOKIE = os.environ.get("AUTH_COOKIE", "")
 
 
-def api_post(path, data):
-    """Post JSON to the portal API."""
-    try:
-        req = urllib.request.Request(
-            f"{API_BASE}{path}",
-            data=json.dumps(data).encode(),
-            headers={"Content-Type": "application/json", "Cookie": f"olam_session={AUTH_COOKIE}"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
-    except Exception as e:
-        print(f"  [api] {e}")
-        return None
+def api_post(path, data, retries=2):
+    """Post JSON to the portal API with retry."""
+    for attempt in range(retries + 1):
+        try:
+            req = urllib.request.Request(
+                f"{API_BASE}{path}",
+                data=json.dumps(data).encode(),
+                headers={"Content-Type": "application/json", "Cookie": f"olam_session={AUTH_COOKIE}"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read()
+                try:
+                    return json.loads(body)
+                except json.JSONDecodeError:
+                    return {"ok": True}
+        except Exception as e:
+            if attempt < retries:
+                time.sleep(2)
+                continue
+            print(f"  [api] {e}")
+            return None
 
 
 def search_estate(sb, court_id, last_name, first_name):
@@ -108,8 +116,8 @@ def search_estate(sb, court_id, last_name, first_name):
             return {"found": False, "error": "Search page not available"}
 
         sb.select_option_by_value("#CourtSelect", court_id)
-        sb.execute_script(f'document.getElementById("LastNameBox").value = "{last_name}";')
-        sb.execute_script(f'document.getElementById("FirstNameBox").value = "{first_name}";')
+        sb.execute_script("document.getElementById('LastNameBox').value = " + json.dumps(last_name) + ";")
+        sb.execute_script("document.getElementById('FirstNameBox').value = " + json.dumps(first_name) + ";")
         sb.click("#NameSearchSubmitName")
         sb.sleep(2)
 
@@ -171,8 +179,12 @@ def main():
     # Parse searches from file or use standalone mode
     searches = []
     if searches_file and os.path.exists(searches_file):
-        with open(searches_file, "r") as f:
-            searches = json.load(f)
+        try:
+            with open(searches_file, "r") as f:
+                searches = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error reading searches file: {e}")
+            searches = []
     else:
         # Standalone mode — read from Google Sheets directly
         try:
@@ -325,6 +337,11 @@ def main():
                 cancelled = True
                 break
 
+            # Skip rows with empty names
+            if not s.get("lastName"):
+                print(f"\n[{i+1}/{len(searches)}] SKIPPED — no name")
+                continue
+
             name = f"{s['lastName']}, {s['firstName']}" if s.get("firstName") else s["lastName"]
             print(f"\n[{i+1}/{len(searches)}] {name} ({s['borough']})...", end=" ", flush=True)
 
@@ -358,14 +375,17 @@ def main():
                         "sheetName": sheet_name,
                     })
                 elif sheets_svc:
-                    sheet_id = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
-                    sn = sheet_name or os.environ.get("GOOGLE_SHEETS_SHEET_NAME", "Sheet1")
-                    sheets_svc.spreadsheets().values().update(
-                        spreadsheetId=sheet_id,
-                        range=f"{sn}!L{s['rowIndex']}:M{s['rowIndex']}",
-                        valueInputOption="RAW",
-                        body={"values": [[status, file_nums]]},
-                    ).execute()
+                    try:
+                        sheet_id = os.environ.get("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+                        sn = sheet_name or os.environ.get("GOOGLE_SHEETS_SHEET_NAME", "Sheet1")
+                        sheets_svc.spreadsheets().values().update(
+                            spreadsheetId=sheet_id,
+                            range=f"{sn}!L{s['rowIndex']}:M{s['rowIndex']}",
+                            valueInputOption="RAW",
+                            body={"values": [[status, file_nums]]},
+                        ).execute()
+                    except Exception as write_err:
+                        print(f"  WARNING: Failed to write to sheet: {write_err}")
 
             except Exception as e:
                 msg = str(e)

@@ -158,26 +158,43 @@ export async function recordEstateResult(
   sheetName?: string
 ): Promise<void> {
   const job = jobs.get(jobId);
-
-  await writeEstateResult(rowIndex, estateStatus, fileNumber, sheetName);
-
-  if (job) {
-    job.processed++;
-    if (estateStatus === "YES") {
-      job.succeeded++;
-    } else if (estateStatus === "ERROR") {
-      job.failed++;
-    }
-    job.lastCompletedRow = { rowIndex, estateStatus, estateFileNumber: fileNumber };
+  if (!job) {
+    console.error(`[estate] recordEstateResult: job ${jobId} not found`);
+    return;
   }
+
+  try {
+    await writeEstateResult(rowIndex, estateStatus, fileNumber, sheetName);
+  } catch (err) {
+    console.error(`[estate] Failed to write estate result for row ${rowIndex}:`, err);
+  }
+
+  job.processed++;
+  if (estateStatus === "YES") {
+    job.succeeded++;
+  } else if (estateStatus === "ERROR") {
+    job.failed++;
+  }
+  job.lastCompletedRow = { rowIndex, estateStatus, estateFileNumber: fileNumber };
 }
 
 /** Mark estate scan as complete */
 export function completeEstateScan(jobId: string): void {
   const job = jobs.get(jobId);
-  if (job && job.status !== "cancelled") {
+  if (job && job.status !== "cancelled" && job.status !== "error") {
     job.status = "completed";
     job.currentName = "";
   }
   if (g.__estateActiveId === jobId) g.__estateActiveId = null;
+}
+
+/** Cleanup old jobs to prevent memory leak */
+export function cleanupOldJobs(): void {
+  const MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
+  const now = Date.now();
+  for (const [jobId, job] of jobs.entries()) {
+    if (now - job.startedAt > MAX_AGE && job.status !== "running" && job.status !== "waiting_captcha") {
+      jobs.delete(jobId);
+    }
+  }
 }

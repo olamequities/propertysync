@@ -264,8 +264,8 @@ export default function Dashboard() {
         body: JSON.stringify({ sheetName: activeTab }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        setEstateError(data.error || "Failed to start estate scan");
+        const data = await res.json().catch(() => ({}));
+        setEstateError(data.error || `Estate scan failed (${res.status})`);
         return;
       }
       const data = await res.json();
@@ -279,11 +279,11 @@ export default function Dashboard() {
         body: JSON.stringify({ sheetName: activeTab, searches: data.searches }),
       });
       if (!launchRes.ok) {
-        const launchData = await launchRes.json();
-        setEstateError(launchData.error || "Failed to launch estate scanner");
+        const launchData = await launchRes.json().catch(() => ({}));
+        setEstateError(launchData.error || `Failed to launch estate scanner (${launchRes.status})`);
       }
-    } catch {
-      setEstateError("Failed to start estate scan");
+    } catch (err) {
+      setEstateError(err instanceof Error ? err.message : "Failed to start estate scan");
     }
   }
 

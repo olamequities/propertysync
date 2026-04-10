@@ -1,12 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
+sb_datas, sb_binaries, sb_hiddenimports = collect_all('seleniumbase')
+sel_datas, sel_binaries, sel_hiddenimports = collect_all('selenium')
 
 a = Analysis(
     ['scripts\\estate-scanner.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
-    hiddenimports=[],
+    binaries=sb_binaries + sel_binaries,
+    datas=sb_datas + sel_datas,
+    hiddenimports=sb_hiddenimports + sel_hiddenimports + [
+        'certifi',
+        'charset_normalizer',
+        'urllib3',
+        'requests',
+        'websocket',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PropScope</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: transparent;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+    .card {
+      background: #1a1a2e;
+      border-radius: 16px;
+      padding: 40px 48px;
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    h1 {
+      color: #e0e0e0;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+    .sub {
+      color: #8888aa;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .loader {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #2a2a4a;
+      border-top-color: #6c63ff;
+      border-radius: 50%;
+      margin: 0 auto;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>PropScope</h1>
+    <p class="sub">Loading&hellip;</p>
+    <div class="loader"></div>
+  </div>
+</body>
+</html>

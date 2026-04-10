@@ -1,6 +1,6 @@
 {
   "name": "olam-app",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "NYC property owner lookup, reverse mortgage lead detection, and estate search",
   "author": "Olam Equities",
   "private": true,
@@ -10,10 +10,13 @@
     "build": "next build",
     "start": "next start",
     "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "estate:build": "py -m PyInstaller --onefile --name estate-scanner --distpath electron/bin scripts/estate-scanner.py",
+    "estate:deps": "py -m pip install -r requirements.txt || echo deps installed",
+    "estate:build": "npm run estate:deps && py -m PyInstaller --clean --distpath electron/bin estate-scanner.spec",
     "electron:build": "npm run estate:build && next build && electron-builder --win --mac",
     "electron:build:win": "npm run estate:build && next build && electron-builder --win",
     "electron:build:mac": "npm run estate:build && next build && electron-builder --mac",
+    "electron:publish:win": "npm run estate:build && next build && electron-builder -p always --win",
+    "electron:publish:mac": "npm run estate:build && next build && electron-builder -p always --mac",
     "electron:start": "electron ."
   },
   "dependencies": {
@@ -45,16 +48,19 @@
       "output": "dist-electron"
     },
     "files": [
-      ".next/standalone/**/*",
-      ".next/static/**/*",
-      "public/**/*",
-      "electron/**/*",
-      "scripts/estate-scanner.py"
+      "electron/**/*"
     ],
     "extraResources": [
       {
         "from": ".next/standalone",
         "to": "app",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".next/standalone/node_modules",
+        "to": "app/node_modules",
         "filter": [
           "**/*"
         ]
@@ -79,8 +85,8 @@
         "filter": ["estate-scanner*"]
       },
       {
-        "from": ".env.local",
-        "to": ".env.local"
+        "from": ".env",
+        "to": ".env"
       }
     ],
     "publish": {

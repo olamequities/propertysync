@@ -139,10 +139,13 @@ function startNextServer() {
       HOSTNAME: "127.0.0.1",
     };
 
-    // Load .env.local from resources, next to exe, or project root
+    // Load env file from resources, next to exe, or project root
     const envPaths = [
+      path.join(process.resourcesPath, ".env"),
       path.join(process.resourcesPath, ".env.local"),
+      path.join(path.dirname(process.execPath), ".env"),
       path.join(path.dirname(process.execPath), ".env.local"),
+      path.join(process.cwd(), ".env"),
       path.join(process.cwd(), ".env.local"),
     ];
     for (const envPath of envPaths) {

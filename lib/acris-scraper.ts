@@ -83,6 +83,8 @@ export interface ReverseMortgageInfo {
   amount: string | null;
   lender: string | null;
   docs: ACRISDocument[];
+  /** All dates where a reverse mortgage pattern was found (for refinance tracking) */
+  allDates: string[];
 }
 
 export interface DocumentAnalysis {
@@ -132,16 +134,17 @@ function isPrivateLender(party: string): boolean {
   return !isHudParty(party);
 }
 
-/** Find the original borrower — the party1 on the earliest mortgage */
-function findOriginalBorrower(mortgages: ACRISDocument[]): string | null {
-  if (mortgages.length === 0) return null;
-  const sorted = [...mortgages].sort((a, b) => {
-    const dateA = a.docDate ? new Date(a.docDate).getTime() : 0;
-    const dateB = b.docDate ? new Date(b.docDate).getTime() : 0;
-    return dateA - dateB;
-  });
-  return sorted[0].party1;
+/** Check if a deed is a survivorship transfer (not a real sale) */
+function isSurvivorshipTransfer(deed: ACRISDocument): boolean {
+  const text = `${deed.party1} ${deed.party2}`.toLowerCase();
+  return (
+    text.includes("surviving") ||
+    text.includes("tenant by the entirety") ||
+    text.includes("tenants by the entirety") ||
+    text.includes("as survivor")
+  );
 }
+
 
 /**
  * Detect reverse mortgage pattern (strict rules from client):
@@ -155,7 +158,7 @@ function findOriginalBorrower(mortgages: ACRISDocument[]): string | null {
  * A single HUD mortgage is just a regular FHA loan — NOT a reverse mortgage.
  */
 export function detectReverseMortgage(mortgages: ACRISDocument[]): ReverseMortgageInfo {
-  const none: ReverseMortgageInfo = { detected: false, borrower: null, date: null, amount: null, lender: null, docs: [] };
+  const none: ReverseMortgageInfo = { detected: false, borrower: null, date: null, amount: null, lender: null, docs: [], allDates: [] };
 
   // Group mortgages by date
   const byDate = new Map<string, ACRISDocument[]>();
@@ -166,7 +169,9 @@ export function detectReverseMortgage(mortgages: ACRISDocument[]): ReverseMortga
     byDate.get(key)!.push(m);
   }
 
-  // Look for the reverse mortgage pattern: same date, same amount, one HUD + one private
+  // Collect ALL reverse mortgage patterns (same date, same amount, one HUD + one private)
+  const allPatterns: Array<{ date: string; hud: ACRISDocument; priv: ACRISDocument }> = [];
+
   for (const [date, group] of byDate) {
     if (group.length < 2) continue;
 
@@ -175,7 +180,6 @@ export function detectReverseMortgage(mortgages: ACRISDocument[]): ReverseMortga
 
     if (hudDocs.length === 0 || privateDocs.length === 0) continue;
 
-    // Check for matching amounts between HUD and private lender
     for (const hud of hudDocs) {
       const hudAmount = parseFloat(hud.amount) || 0;
       if (hudAmount === 0) continue;
@@ -186,19 +190,27 @@ export function detectReverseMortgage(mortgages: ACRISDocument[]): ReverseMortga
       });
 
       if (matchingPrivate) {
-        return {
-          detected: true,
-          borrower: hud.party1,
-          date,
-          amount: hud.amount,
-          lender: `${matchingPrivate.party2} / ${hud.party2}`,
-          docs: [matchingPrivate, hud],
-        };
+        allPatterns.push({ date, hud, priv: matchingPrivate });
+        break; // one match per date is enough
       }
     }
   }
 
-  return none;
+  if (allPatterns.length === 0) return none;
+
+  // Use the MOST RECENT reverse mortgage pattern (earlier ones were refinanced)
+  allPatterns.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const latest = allPatterns[0];
+
+  return {
+    detected: true,
+    borrower: latest.hud.party1,
+    date: latest.date,
+    amount: latest.hud.amount,
+    lender: `${latest.priv.party2} / ${latest.hud.party2}`,
+    docs: [latest.priv, latest.hud],
+    allDates: allPatterns.map(p => p.date),
+  };
 }
 
 const MAX_RETRIES = 3;
@@ -362,75 +374,45 @@ export function analyzeDocuments(docs: ACRISDocument[], ownerName: string | null
   const sortedDeeds = [...deeds].sort((a, b) => parseDate(b) - parseDate(a));
   const lastDeed = sortedDeeds[0] || null;
 
-  const sortedMortgages = [...mortgages].sort((a, b) => parseDate(b) - parseDate(a));
-  const latestMortgage = sortedMortgages[0] || null;
-
   let hasBeenSold = false;
   const reasons: string[] = [];
-
-  const originalBorrower = findOriginalBorrower(mortgages);
 
   if (lastDeed) {
     const buyer = lastDeed.party2;
     const seller = lastDeed.party1;
 
     const isSelfTransfer = namesMatch(seller, buyer);
+    const isSurvivorship = isSurvivorshipTransfer(lastDeed);
 
-    if (!isSelfTransfer && lastDeed.docDate) {
-      const buyerMatchesBorrower = originalBorrower ? namesMatch(buyer, originalBorrower) : false;
+    if (!isSelfTransfer && !isSurvivorship && lastDeed.docDate) {
+      // Fix 1: Compare deed buyer against reverse mortgage borrower (not earliest mortgage borrower)
+      const buyerMatchesRMBorrower = reverseMortgage.detected && reverseMortgage.borrower
+        ? namesMatch(buyer, reverseMortgage.borrower)
+        : false;
       const buyerIsCurrentOwner = ownerName ? namesMatch(buyer, ownerName) : false;
 
-      if (!buyerMatchesBorrower && !buyerIsCurrentOwner) {
+      if (!buyerMatchesRMBorrower && !buyerIsCurrentOwner) {
         hasBeenSold = true;
         reasons.push(`Property SOLD: ${seller} -> ${buyer} on ${lastDeed.docDate} ($${lastDeed.amount || "0"})`);
-      }
-    }
-
-    if (latestMortgage && originalBorrower) {
-      const sameAsBorrower = namesMatch(latestMortgage.party1, originalBorrower);
-      const latestIsCurrentOwner = ownerName ? namesMatch(latestMortgage.party1, ownerName) : false;
-
-      if (!sameAsBorrower && !latestIsCurrentOwner) {
-        hasBeenSold = true;
-        if (!reasons.some(r => r.includes("SOLD"))) {
-          reasons.push(`Property SOLD: New mortgage by ${latestMortgage.party1} (not original borrower ${originalBorrower})`);
-        }
-        reasons.push(`New owner mortgage: ${latestMortgage.party1} -> ${latestMortgage.party2} $${latestMortgage.amount} on ${latestMortgage.docDate}`);
       }
     }
   }
 
   const activeMortgageCount = mortgages.length - satisfactions.length;
 
+  // Fix 2: Reverse mortgage is satisfied ONLY if HUD satisfactions exceed refinance count.
+  // Each RM refinance produces a satisfaction of the old HUD mortgage, so we need
+  // more HUD satisfactions than refinances to conclude the current RM was paid off.
   let reverseMortgageSatisfied = false;
-  if (reverseMortgage.detected && reverseMortgage.lender) {
-    const chainEntities = new Set<string>();
-    for (const rmDoc of reverseMortgage.docs) {
-      chainEntities.add(normalizeName(rmDoc.party2));
-    }
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const a of assignments) {
-        const assignorNorm = normalizeName(a.party1);
-        const assigneeNorm = normalizeName(a.party2);
-        const matchesChain = [...chainEntities].some(e =>
-          e.includes(assignorNorm) || assignorNorm.includes(e)
-        );
-        if (matchesChain && !chainEntities.has(assigneeNorm)) {
-          chainEntities.add(assigneeNorm);
-          changed = true;
-        }
-      }
-    }
-
-    reverseMortgageSatisfied = satisfactions.some(s => {
-      const satLenderNorm = normalizeName(s.party2);
-      return [...chainEntities].some(e =>
-        e.includes(satLenderNorm) || satLenderNorm.includes(e)
-      );
+  if (reverseMortgage.detected && reverseMortgage.allDates.length > 0) {
+    const firstRmTime = Math.min(...reverseMortgage.allDates.map(d => new Date(d).getTime()));
+    const hudSatisfactions = satisfactions.filter(s => {
+      if (!isHudParty(s.party2)) return false;
+      const satTime = parseDate(s);
+      return satTime > firstRmTime;
     });
+    const numRefinances = reverseMortgage.allDates.length - 1;
+    reverseMortgageSatisfied = hudSatisfactions.length > numRefinances;
   }
 
   // Billing name pre-filter: if billing is a bank, it's NOT a reverse mortgage lead

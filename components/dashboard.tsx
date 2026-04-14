@@ -1,731 +1,748 @@
-"use client";
-
-import { useEffect, useState, useCallback } from "react";
-import type { SheetStats, SheetRow, SheetTab } from "@/lib/types";
-import Header from "./header";
-import SheetTable from "./sheet-table";
-import SyncProgress from "./sync-progress";
-import ParcelProgress from "./parcel-progress";
-import EstateProgress from "./estate-progress";
-
-export default function Dashboard() {
-  const [tabs, setTabs] = useState<SheetTab[]>([]);
-  const [activeTab, setActiveTab] = useState<string>("");
-  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
-  const [stats, setStats] = useState<SheetStats | null>(null);
-  const [rows, setRows] = useState<SheetRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  // Sync state
-  const [syncing, setSyncing] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState("");
-  const [processingRowIndex, setProcessingRowIndex] = useState<number | undefined>();
-  const [justFilledRowIndex, setJustFilledRowIndex] = useState<number | undefined>();
-  const [failedRowIndices, setFailedRowIndices] = useState<Set<number>>(new Set());
-
-  // Parcel scan state
-  const [parcelScanning, setParcelScanning] = useState(false);
-  const [parcelJobId, setParcelJobId] = useState<string | null>(null);
-  const [parcelError, setParcelError] = useState("");
-
-  // Estate scan state
-  const [estateScanning, setEstateScanning] = useState(false);
-  const [estateJobId, setEstateJobId] = useState<string | null>(null);
-  const [estateError, setEstateError] = useState("");
-
-  // Row range
-  const [rangeMode, setRangeMode] = useState<"all" | "range">("all");
-  const [startRow, setStartRow] = useState("");
-  const [endRow, setEndRow] = useState("");
-
-  const [refreshing, setRefreshing] = useState(false);
-
-  const fetchTabs = useCallback(async () => {
-    try {
-      const res = await fetch("/api/sheet/tabs");
-      const data = await res.json();
-      if (data.tabs && Array.isArray(data.tabs)) {
-        setTabs(data.tabs);
-        if (data.tabs.length > 0 && !activeTab) setActiveTab(data.tabs[0].title);
+s]));
       }
-      if (data.sheetUrl) setSheetUrl(data.sheetUrl);
-    } catch {
-      setError("Failed to load sheet tabs");
-    }
-  }, [activeTab]);
-
-  // Load tabs + check for active sync on mount
-  useEffect(() => {
-    fetchTabs();
-    // Reconnect to active sync if page was refreshed
-    fetch("/api/sync")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.running && data.jobId) {
-          setJobId(data.jobId);
-          setSyncing(true);
+      [nodeUtil.inspect.custom](depth, options) {
+        if (options.depth === null) {
+          options.depth = 2;
         }
-      })
-      .catch(() => {});
-    // Reconnect to active parcel scan if page was refreshed
-    fetch("/api/parcels")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.running && data.jobId) {
-          setParcelJobId(data.jobId);
-          setParcelScanning(true);
-        }
-      })
-      .catch(() => {});
-    // Reconnect to active estate scan if page was refreshed
-    fetch("/api/estate")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.running && data.jobId) {
-          setEstateJobId(data.jobId);
-          setEstateScanning(true);
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Load stats + rows when tab changes
-  const fetchData = useCallback(async () => {
-    if (!activeTab) return;
-    setLoading(true);
-    setError("");
-
-    try {
-      const [statsRes, rowsRes] = await Promise.all([
-        fetch(`/api/sheet?tab=${encodeURIComponent(activeTab)}`),
-        fetch(`/api/sheet/rows?tab=${encodeURIComponent(activeTab)}`),
-      ]);
-
-      if (!statsRes.ok || !rowsRes.ok) throw new Error("Failed to load data");
-
-      const [statsData, rowsData] = await Promise.all([
-        statsRes.json(),
-        rowsRes.json(),
-      ]);
-
-      setStats(statsData);
-      setRows(rowsData);
-    } catch {
-      setError("Failed to load sheet data");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  async function handleRefresh() {
-    setRefreshing(true);
-    await Promise.all([fetchTabs(), fetchData()]);
-    setRefreshing(false);
-  }
-
-  async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    window.location.reload();
-  }
-
-  async function handleSync() {
-    setSyncError("");
-    setFailedRowIndices(new Set());
-
-    const body: Record<string, unknown> = { sheetName: activeTab };
-    if (rangeMode === "range") {
-      if (startRow) body.startRow = parseInt(startRow, 10);
-      if (endRow) body.endRow = parseInt(endRow, 10);
-    }
-
-    try {
-      const res = await fetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        setSyncError(data.error || "Failed to start sync");
-        return;
+        options.colors ??= true;
+        const properties = {
+          status: this.status,
+          statusText: this.statusText,
+          headers: this.headers,
+          body: this.body,
+          bodyUsed: this.bodyUsed,
+          ok: this.ok,
+          redirected: this.redirected,
+          type: this.type,
+          url: this.url
+        };
+        return `Response ${nodeUtil.formatWithOptions(options, properties)}`;
       }
-
-      const data = await res.json();
-      setJobId(data.jobId);
-      setSyncing(true);
-    } catch {
-      setSyncError("Failed to start sync");
-    }
-  }
-
-  function handleSyncDone() {
-    setProcessingRowIndex(undefined);
-    // Refresh stats only, not the full table (rows already updated in real-time via SSE)
-    if (activeTab) {
-      fetch(`/api/sheet?tab=${encodeURIComponent(activeTab)}`)
-        .then((res) => res.ok ? res.json() : null)
-        .then((data) => { if (data) setStats(data); })
-        .catch(() => {});
-    }
-  }
-
-  function handleSyncDismiss() {
-    setSyncing(false);
-    setJobId(null);
-    setProcessingRowIndex(undefined);
-    setJustFilledRowIndex(undefined);
-  }
-
-  const handleRowUpdate = useCallback((rowIndex: number, ownerName: string, billing: string) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.rowIndex === rowIndex
-          ? { ...r, ownerName, billingNameAndAddress: billing }
-          : r
-      )
-    );
-    setJustFilledRowIndex(rowIndex);
-    // Update stats in real-time
-    setStats((prev) => prev ? {
-      ...prev,
-      filledRows: prev.filledRows + 1,
-      emptyRows: prev.emptyRows - 1,
-    } : prev);
-  }, []);
-
-  async function handleParcelScan() {
-    setParcelError("");
-    try {
-      const res = await fetch("/api/parcels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sheetName: activeTab }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        setParcelError(data.error || "Failed to start parcel scan");
-        return;
+    };
+    __name(_Response, "Response");
+    var Response2 = _Response;
+    mixinBody(Response2);
+    Object.defineProperties(Response2.prototype, {
+      type: kEnumerableProperty,
+      url: kEnumerableProperty,
+      status: kEnumerableProperty,
+      ok: kEnumerableProperty,
+      redirected: kEnumerableProperty,
+      statusText: kEnumerableProperty,
+      headers: kEnumerableProperty,
+      clone: kEnumerableProperty,
+      body: kEnumerableProperty,
+      bodyUsed: kEnumerableProperty,
+      [Symbol.toStringTag]: {
+        value: "Response",
+        configurable: true
       }
-
-      const data = await res.json();
-      setParcelJobId(data.jobId);
-      setParcelScanning(true);
-    } catch {
-      setParcelError("Failed to start parcel scan");
-    }
-  }
-
-  function handleParcelDone() {
-    // Refresh stats
-    if (activeTab) {
-      fetch(`/api/sheet?tab=${encodeURIComponent(activeTab)}`)
-        .then((res) => res.ok ? res.json() : null)
-        .then((data) => { if (data) setStats(data); })
-        .catch(() => {});
-    }
-  }
-
-  function handleParcelDismiss() {
-    setParcelScanning(false);
-    setParcelJobId(null);
-  }
-
-  const handleParcelRowUpdate = useCallback((rowIndex: number, parcelStatus: string, parcelDetails: string) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.rowIndex === rowIndex
-          ? { ...r, parcelStatus, parcelDetails }
-          : r
-      )
-    );
-    setStats((prev) => prev ? {
-      ...prev,
-      parcelScanned: prev.parcelScanned + 1,
-      parcelRemaining: prev.parcelRemaining - 1,
-    } : prev);
-  }, []);
-
-  // Estate scan handlers
-  async function handleEstateScan() {
-    setEstateError("");
-    try {
-      const res = await fetch("/api/estate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sheetName: activeTab }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setEstateError(data.error || `Estate scan failed (${res.status})`);
-        return;
-      }
-      const data = await res.json();
-      setEstateJobId(data.jobId);
-      setEstateScanning(true);
-
-      // Launch the Python estate scanner
-      const launchRes = await fetch("/api/estate/launch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sheetName: activeTab, searches: data.searches }),
-      });
-      if (!launchRes.ok) {
-        const launchData = await launchRes.json().catch(() => ({}));
-        setEstateError(launchData.error || `Failed to launch estate scanner (${launchRes.status})`);
-      }
-    } catch (err) {
-      setEstateError(err instanceof Error ? err.message : "Failed to start estate scan");
-    }
-  }
-
-  function handleEstateDone() {
-    if (activeTab) {
-      fetch(`/api/sheet?tab=${encodeURIComponent(activeTab)}`)
-        .then((res) => res.ok ? res.json() : null)
-        .then((data) => { if (data) setStats(data); })
-        .catch(() => {});
-    }
-  }
-
-  function handleEstateDismiss() {
-    setEstateScanning(false);
-    setEstateJobId(null);
-  }
-
-  const handleEstateRowUpdate = useCallback((rowIndex: number, estateStatus: string, estateFileNumber: string) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.rowIndex === rowIndex
-          ? { ...r, estateStatus, estateFileNumber }
-          : r
-      )
-    );
-    setStats((prev) => prev ? {
-      ...prev,
-      estateChecked: prev.estateChecked + 1,
-      estateRemaining: prev.estateRemaining - 1,
-    } : prev);
-  }, []);
-
-  const handleProcessingRow = useCallback((address: string) => {
-    setRows((prev) => {
-      const match = prev.find((r) => {
-        const street = r.street.replace(/\s*#\s*\d+.*$/, "");
-        return `${r.houseNumber} ${street}` === address;
-      });
-      if (match) setProcessingRowIndex(match.rowIndex);
-      return prev;
     });
-  }, []);
+    Object.defineProperties(Response2, {
+      json: kEnumerableProperty,
+      redirect: kEnumerableProperty,
+      error: kEnumerableProperty
+    });
+    function cloneResponse(response) {
+      if (response.internalResponse) {
+        return filterResponse(
+          cloneResponse(response.internalResponse),
+          response.type
+        );
+      }
+      const newResponse = makeResponse({ ...response, body: null });
+      if (response.body != null) {
+        newResponse.body = cloneBody(newResponse, response.body);
+      }
+      return newResponse;
+    }
+    __name(cloneResponse, "cloneResponse");
+    function makeResponse(init) {
+      return {
+        aborted: false,
+        rangeRequested: false,
+        timingAllowPassed: false,
+        requestIncludesCredentials: false,
+        type: "default",
+        status: 200,
+        timingInfo: null,
+        cacheState: "",
+        statusText: "",
+        ...init,
+        headersList: init?.headersList ? new HeadersList(init?.headersList) : new HeadersList(),
+        urlList: init?.urlList ? [...init.urlList] : []
+      };
+    }
+    __name(makeResponse, "makeResponse");
+    function makeNetworkError2(reason) {
+      const isError = isErrorLike(reason);
+      return makeResponse({
+        type: "error",
+        status: 0,
+        error: isError ? reason : new Error(reason ? String(reason) : reason),
+        aborted: reason && reason.name === "AbortError"
+      });
+    }
+    __name(makeNetworkError2, "makeNetworkError");
+    function isNetworkError(response) {
+      return (
+        // A network error is a response whose type is "error",
+        response.type === "error" && // status is 0
+        response.status === 0
+      );
+    }
+    __name(isNetworkError, "isNetworkError");
+    function makeFilteredResponse(response, state) {
+      state = {
+        internalResponse: response,
+        ...state
+      };
+      return new Proxy(response, {
+        get(target, p) {
+          return p in state ? state[p] : target[p];
+        },
+        set(target, p, value) {
+          assert(!(p in state));
+          target[p] = value;
+          return true;
+        }
+      });
+    }
+    __name(makeFilteredResponse, "makeFilteredResponse");
+    function filterResponse(response, type) {
+      if (type === "basic") {
+        return makeFilteredResponse(response, {
+          type: "basic",
+          headersList: response.headersList
+        });
+      } else if (type === "cors") {
+        return makeFilteredResponse(response, {
+          type: "cors",
+          headersList: response.headersList
+        });
+      } else if (type === "opaque") {
+        return makeFilteredResponse(response, {
+          type: "opaque",
+          urlList: Object.freeze([]),
+          status: 0,
+          statusText: "",
+          body: null
+        });
+      } else if (type === "opaqueredirect") {
+        return makeFilteredResponse(response, {
+          type: "opaqueredirect",
+          status: 0,
+          statusText: "",
+          headersList: [],
+          body: null
+        });
+      } else {
+        assert(false);
+      }
+    }
+    __name(filterResponse, "filterResponse");
+    function makeAppropriateNetworkError(fetchParams, err = null) {
+      assert(isCancelled(fetchParams));
+      return isAborted(fetchParams) ? makeNetworkError2(Object.assign(new DOMException("The operation was aborted.", "AbortError"), { cause: err })) : makeNetworkError2(Object.assign(new DOMException("Request was cancelled."), { cause: err }));
+    }
+    __name(makeAppropriateNetworkError, "makeAppropriateNetworkError");
+    function initializeResponse(response, init, body) {
+      if (init.status !== null && (init.status < 200 || init.status > 599)) {
+        throw new RangeError('init["status"] must be in the range of 200 to 599, inclusive.');
+      }
+      if ("statusText" in init && init.statusText != null) {
+        if (!isValidReasonPhrase(String(init.statusText))) {
+          throw new TypeError("Invalid statusText");
+        }
+      }
+      if ("status" in init && init.status != null) {
+        response[kState].status = init.status;
+      }
+      if ("statusText" in init && init.statusText != null) {
+        response[kState].statusText = init.statusText;
+      }
+      if ("headers" in init && init.headers != null) {
+        fill(response[kHeaders], init.headers);
+      }
+      if (body) {
+        if (nullBodyStatus.includes(response.status)) {
+          throw webidl.errors.exception({
+            header: "Response constructor",
+            message: `Invalid response status code ${response.status}`
+          });
+        }
+        response[kState].body = body.body;
+        if (body.type != null && !response[kState].headersList.contains("content-type", true)) {
+          response[kState].headersList.append("content-type", body.type, true);
+        }
+      }
+    }
+    __name(initializeResponse, "initializeResponse");
+    function fromInnerResponse2(innerResponse, guard) {
+      const response = new Response2(kConstruct);
+      response[kState] = innerResponse;
+      response[kHeaders] = new Headers2(kConstruct);
+      setHeadersList(response[kHeaders], innerResponse.headersList);
+      setHeadersGuard(response[kHeaders], guard);
+      if (hasFinalizationRegistry && innerResponse.body?.stream) {
+        streamRegistry.register(response, new WeakRef(innerResponse.body.stream));
+      }
+      return response;
+    }
+    __name(fromInnerResponse2, "fromInnerResponse");
+    webidl.converters.ReadableStream = webidl.interfaceConverter(
+      ReadableStream
+    );
+    webidl.converters.FormData = webidl.interfaceConverter(
+      FormData2
+    );
+    webidl.converters.URLSearchParams = webidl.interfaceConverter(
+      URLSearchParams
+    );
+    webidl.converters.XMLHttpRequestBodyInit = function(V, prefix, name) {
+      if (typeof V === "string") {
+        return webidl.converters.USVString(V, prefix, name);
+      }
+      if (isBlobLike(V)) {
+        return webidl.converters.Blob(V, prefix, name, { strict: false });
+      }
+      if (ArrayBuffer.isView(V) || types.isArrayBuffer(V)) {
+        return webidl.converters.BufferSource(V, prefix, name);
+      }
+      if (util.isFormDataLike(V)) {
+        return webidl.converters.FormData(V, prefix, name, { strict: false });
+      }
+      if (V instanceof URLSearchParams) {
+        return webidl.converters.URLSearchParams(V, prefix, name);
+      }
+      return webidl.converters.DOMString(V, prefix, name);
+    };
+    webidl.converters.BodyInit = function(V, prefix, argument) {
+      if (V instanceof ReadableStream) {
+        return webidl.converters.ReadableStream(V, prefix, argument);
+      }
+      if (V?.[Symbol.asyncIterator]) {
+        return V;
+      }
+      return webidl.converters.XMLHttpRequestBodyInit(V, prefix, argument);
+    };
+    webidl.converters.ResponseInit = webidl.dictionaryConverter([
+      {
+        key: "status",
+        converter: webidl.converters["unsigned short"],
+        defaultValue: () => 200
+      },
+      {
+        key: "statusText",
+        converter: webidl.converters.ByteString,
+        defaultValue: () => ""
+      },
+      {
+        key: "headers",
+        converter: webidl.converters.HeadersInit
+      }
+    ]);
+    module2.exports = {
+      isNetworkError,
+      makeNetworkError: makeNetworkError2,
+      makeResponse,
+      makeAppropriateNetworkError,
+      filterResponse,
+      Response: Response2,
+      cloneResponse,
+      fromInnerResponse: fromInnerResponse2
+    };
+  }
+});
 
-  const pct = stats && stats.totalRows > 0
-    ? Math.round((stats.filledRows / stats.totalRows) * 100)
-    : 0;
+// ../../node_modules/.pnpm/undici@6.21.0/node_modules/undici/lib/web/fetch/dispatcher-weakref.js
+var require_dispatcher_weakref = __commonJS({
+  "../../node_modules/.pnpm/undici@6.21.0/node_modules/undici/lib/web/fetch/dispatcher-weakref.js"(exports2, module2) {
+    "use strict";
+    init_define_process();
+    var { kConnected, kSize } = require_symbols();
+    var _CompatWeakRef = class _CompatWeakRef {
+      constructor(value) {
+        this.value = value;
+      }
+      deref() {
+        return this.value[kConnected] === 0 && this.value[kSize] === 0 ? void 0 : this.value;
+      }
+    };
+    __name(_CompatWeakRef, "CompatWeakRef");
+    var CompatWeakRef = _CompatWeakRef;
+    var _CompatFinalizer = class _CompatFinalizer {
+      constructor(finalizer) {
+        this.finalizer = finalizer;
+      }
+      register(dispatcher, key) {
+        if (dispatcher.on) {
+          dispatcher.on("disconnect", () => {
+            if (dispatcher[kConnected] === 0 && dispatcher[kSize] === 0) {
+              this.finalizer(key);
+            }
+          });
+        }
+      }
+      unregister(key) {
+      }
+    };
+    __name(_CompatFinalizer, "CompatFinalizer");
+    var CompatFinalizer = _CompatFinalizer;
+    module2.exports = function() {
+      if (define_process_default.env.NODE_V8_COVERAGE && define_process_default.version.startsWith("v18")) {
+        define_process_default._rawDebug("Using compatibility WeakRef and FinalizationRegistry");
+        return {
+          WeakRef: CompatWeakRef,
+          FinalizationRegistry: CompatFinalizer
+        };
+      }
+      return { WeakRef, FinalizationRegistry };
+    };
+  }
+});
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <Header onLogout={handleLogout} />
-
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-5">
-        {/* Page header row */}
-        <div className="flex items-start justify-between animate-fade-in-up">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground tracking-tight">
-              Property Data Sync
-            </h1>
-            <p className="text-secondary text-sm mt-0.5">
-              Look up NYC property owner and billing information
-            </p>
-          </div>
-          {sheetUrl && (
-            <a
-              href={sheetUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-accent hover:text-accent-hover bg-accent-dim hover:bg-accent/10 rounded-[4px] transition-colors"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
-              Open Sheet
-            </a>
-          )}
-        </div>
-
-        {/* Controls bar */}
-        <div className="bg-surface border border-border rounded-lg p-4 animate-fade-in-up stagger-1">
-          <div className="flex flex-wrap items-end gap-4">
-            {/* Tab selector */}
-            <div className="flex-1 min-w-[180px] max-w-[260px]">
-              <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted mb-1.5">
-                Sheet Tab
-              </label>
-              <select
-                value={activeTab}
-                onChange={(e) => setActiveTab(e.target.value)}
-                disabled={syncing}
-                className="w-full px-3 py-2 bg-surface border-2 border-border rounded-[4px] text-sm text-foreground focus:outline-none focus:border-accent transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {tabs.map((tab) => (
-                  <option key={tab.title} value={tab.title}>
-                    {tab.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Row range */}
-            <div className="flex items-end gap-3">
-              <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted mb-1.5">
-                  Rows
-                </label>
-                <div className="flex border-2 border-border rounded-[4px] overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setRangeMode("all")}
-                    disabled={syncing}
-                    className={`px-3 py-2 text-xs font-semibold transition-colors cursor-pointer ${
-                      rangeMode === "all"
-                        ? "bg-accent text-white"
-                        : "bg-surface text-secondary hover:bg-raised"
-                    }`}
-                  >
-                    All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRangeMode("range")}
-                    disabled={syncing}
-                    className={`px-3 py-2 text-xs font-semibold transition-colors cursor-pointer border-l-2 border-border ${
-                      rangeMode === "range"
-                        ? "bg-accent text-white"
-                        : "bg-surface text-secondary hover:bg-raised"
-                    }`}
-                  >
-                    Range
-                  </button>
-                </div>
-              </div>
-
-              {rangeMode === "range" && (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    placeholder="From"
-                    value={startRow}
-                    onChange={(e) => setStartRow(e.target.value)}
-                    disabled={syncing}
-                    min={1}
-                    className="w-20 px-3 py-2 bg-surface border-2 border-border rounded-[4px] text-sm text-foreground placeholder-dim focus:outline-none focus:border-accent transition-colors font-[family-name:var(--font-mono)]"
-                  />
-                  <span className="text-muted text-xs">to</span>
-                  <input
-                    type="number"
-                    placeholder="End"
-                    value={endRow}
-                    onChange={(e) => setEndRow(e.target.value)}
-                    disabled={syncing}
-                    min={1}
-                    className="w-20 px-3 py-2 bg-surface border-2 border-border rounded-[4px] text-sm text-foreground placeholder-dim focus:outline-none focus:border-accent transition-colors font-[family-name:var(--font-mono)]"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Spacer */}
-            <div className="flex-1" />
-
-            {/* Refresh button */}
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={refreshing || syncing || parcelScanning}
-              className="px-3 py-2 bg-surface border-2 border-border hover:bg-raised disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] text-secondary transition-colors cursor-pointer"
-              title="Refresh sheet data"
-            >
-              <svg
-                width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                className={refreshing ? "animate-spin" : ""}
-              >
-                <path d="M21 2v6h-6" />
-                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-                <path d="M3 22v-6h6" />
-                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-              </svg>
-            </button>
-
-            {/* Sync button */}
-            {!syncing && (
-              <button
-                type="button"
-                onClick={handleSync}
-                disabled={!stats || stats.emptyRows === 0 || loading || parcelScanning}
-                className="px-5 py-2 bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] font-semibold text-sm text-white transition-colors cursor-pointer shadow-sm"
-              >
-                {stats?.emptyRows === 0 ? "All rows synced" : "Start sync"}
-              </button>
-            )}
-
-            {/* Identify Parcels button */}
-            {!parcelScanning && (
-              <button
-                type="button"
-                onClick={handleParcelScan}
-                disabled={loading || syncing}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] font-semibold text-sm text-white transition-colors cursor-pointer shadow-sm"
-              >
-                Identify Parcels
-              </button>
-            )}
-
-            {/* Check Estates button */}
-            {!estateScanning && (
-              <button
-                type="button"
-                onClick={handleEstateScan}
-                disabled={loading || syncing || parcelScanning}
-                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-[4px] font-semibold text-sm text-white transition-colors cursor-pointer shadow-sm"
-              >
-                Check Estates
-              </button>
-            )}
-          </div>
-
-          {syncError && (
-            <div className="mt-3 flex items-center gap-2 text-sm">
-              <span className="lozenge lozenge-danger">Error</span>
-              <span className="text-danger">{syncError}</span>
-            </div>
-          )}
-          {parcelError && (
-            <div className="mt-3 flex items-center gap-2 text-sm">
-              <span className="lozenge lozenge-danger">Error</span>
-              <span className="text-danger">{parcelError}</span>
-            </div>
-          )}
-          {estateError && (
-            <div className="mt-3 flex items-center gap-2 text-sm">
-              <span className="lozenge lozenge-danger">Error</span>
-              <span className="text-danger">{estateError}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Stats row — Sync + Parcel side by side */}
-        {stats && !loading && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in-up stagger-2">
-            {/* Sync stats */}
-            <div className="bg-surface border border-border rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-accent" />
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Property Sync</p>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mb-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Total</p>
-                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.totalRows}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Synced</p>
-                  <p className="text-xl font-semibold text-green tabular-nums">{stats.filledRows}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Remaining</p>
-                  <p className="text-xl font-semibold text-warning tabular-nums">{stats.emptyRows}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="bg-accent h-full rounded-full transition-all duration-500"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <span className="text-xs font-semibold text-muted tabular-nums w-10 text-right">{pct}%</span>
-              </div>
-            </div>
-
-            {/* Parcel stats */}
-            <div className="bg-surface border border-border rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-purple-500" />
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Parcel Scan</p>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mb-2">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Scanned</p>
-                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.parcelScanned}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Remaining</p>
-                  <p className="text-xl font-semibold text-warning tabular-nums">{stats.parcelRemaining}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Good Leads</p>
-                  <p className="text-xl font-semibold text-green tabular-nums">{stats.parcelGoodLeads}</p>
-                </div>
-              </div>
-              {stats.parcelScanned > 0 && (
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] mb-3">
-                  <span className="text-danger">{stats.parcelSold} sold</span>
-                  <span className="text-muted">{stats.parcelNoReverse} no rev. mtg</span>
-                  <span className="text-warning">{stats.parcelSatisfied} satisfied</span>
-                  {stats.parcelError > 0 && <span className="text-danger">{stats.parcelError} errors</span>}
-                </div>
-              )}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="bg-purple-500 h-full rounded-full transition-all duration-500"
-                    style={{ width: `${stats.totalRows > 0 ? Math.round((stats.parcelScanned / stats.totalRows) * 100) : 0}%` }}
-                  />
-                </div>
-                <span className="text-xs font-semibold text-muted tabular-nums w-10 text-right">
-                  {stats.totalRows > 0 ? Math.round((stats.parcelScanned / stats.totalRows) * 100) : 0}%
-                </span>
-              </div>
-            </div>
-
-            {/* Estate stats */}
-            <div className="bg-surface border border-border rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-amber-500" />
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Estate Check</p>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mb-2">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Good Leads</p>
-                  <p className="text-xl font-semibold text-foreground tabular-nums">{stats.estateChecked + stats.estateRemaining}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Checked</p>
-                  <p className="text-xl font-semibold text-green tabular-nums">{stats.estateChecked}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-dim mb-0.5">Remaining</p>
-                  <p className="text-xl font-semibold text-warning tabular-nums">{stats.estateRemaining}</p>
-                </div>
-              </div>
-              {stats.estateChecked > 0 && (
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] mb-3">
-                  <span className="text-green font-medium">{stats.estateYes} with estate</span>
-                  <span className="text-muted">{stats.estateNo} no estate</span>
-                </div>
-              )}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 bg-raised rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="bg-amber-500 h-full rounded-full transition-all duration-500"
-                    style={{ width: `${(stats.estateChecked + stats.estateRemaining) > 0 ? Math.round((stats.estateChecked / (stats.estateChecked + stats.estateRemaining)) * 100) : 0}%` }}
-                  />
-                </div>
-                <span className="text-xs font-semibold text-muted tabular-nums w-10 text-right">
-                  {(stats.estateChecked + stats.estateRemaining) > 0 ? Math.round((stats.estateChecked / (stats.estateChecked + stats.estateRemaining)) * 100) : 0}%
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Sync progress banner */}
-        {syncing && jobId && (
-          <div className="animate-fade-in-up">
-            <SyncProgress
-              jobId={jobId}
-              onDone={handleSyncDone}
-              onDismiss={handleSyncDismiss}
-              onRowUpdate={handleRowUpdate}
-              onProcessingRow={handleProcessingRow}
-              rows={rows}
-            />
-          </div>
-        )}
-
-        {/* Parcel scan progress banner */}
-        {parcelScanning && parcelJobId && (
-          <div className="animate-fade-in-up">
-            <ParcelProgress
-              jobId={parcelJobId}
-              onDone={handleParcelDone}
-              onDismiss={handleParcelDismiss}
-              onRowUpdate={handleParcelRowUpdate}
-            />
-          </div>
-        )}
-
-        {/* Estate scan progress banner */}
-        {estateScanning && estateJobId && (
-          <div className="animate-fade-in-up">
-            <EstateProgress
-              jobId={estateJobId}
-              onDone={handleEstateDone}
-              onDismiss={handleEstateDismiss}
-              onRowUpdate={handleEstateRowUpdate}
-            />
-          </div>
-        )}
-
-        {/* Error state */}
-        {error && !loading && (
-          <div className="bg-danger-dim border border-danger/20 rounded-lg px-4 py-3 flex items-center gap-3">
-            <span className="lozenge lozenge-danger">Error</span>
-            <span className="text-sm text-danger">{error}</span>
-            <button
-              type="button"
-              onClick={fetchData}
-              className="ml-auto text-xs font-semibold text-accent hover:text-accent-hover cursor-pointer"
-            >
-              Retry
-            </button>
-          </div>
-        )}
-
-        {/* Loading */}
-        {loading && (
-          <div className="bg-surface border border-border rounded-lg p-12 flex items-center justify-center">
-            <div className="flex items-center gap-3">
-              <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-              <p className="text-secondary text-sm">Loading sheet data...</p>
-            </div>
-          </div>
-        )}
-
-        {/* Spreadsheet table */}
-        {!loading && !error && (
-          <div className="animate-fade-in-up stagger-3">
-            <SheetTable
-              rows={rows}
-              processingRowIndex={processingRowIndex}
-              justFilledRowIndex={justFilledRowIndex}
-              failedRowIndices={failedRowIndices}
-            />
-          </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border py-4 mt-auto">
-        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
-          <p className="text-xs text-muted">
-            Olam PropertySync v1.0
-          </p>
-          <p className="text-xs text-dim">
-            NYC property owner & billing lookup
-          </p>
-        </div>
-      </footer>
-    </div>
-  );
-}
+// ../../node_modules/.pnpm/undici@6.21.0/node_modules/undici/lib/web/fetch/request.js
+var require_request = __commonJS({
+  "../../node_modules/.pnpm/undici@6.21.0/node_modules/undici/lib/web/fetch/request.js"(exports2, module2) {
+    "use strict";
+    init_define_process();
+    var { extractBody, mixinBody, cloneBody, bodyUnusable } = require_body();
+    var { Headers: Headers2, fill: fillHeaders, HeadersList, setHeadersGuard, getHeadersGuard, setHeadersList, getHeadersList } = require_headers();
+    var { FinalizationRegistry: FinalizationRegistry2 } = require_dispatcher_weakref()();
+    var util = require_util();
+    var nodeUtil = require("util");
+    var {
+      isValidHTTPToken,
+      sameOrigin,
+      environmentSettingsObject
+    } = require_util2();
+    var {
+      forbiddenMethodsSet,
+      corsSafeListedMethodsSet,
+      referrerPolicy,
+      requestRedirect,
+      requestMode,
+      requestCredentials,
+      requestCache,
+      requestDuplex
+    } = require_constants3();
+    var { kEnumerableProperty, normalizedMethodRecordsBase, normalizedMethodRecords } = util;
+    var { kHeaders, kSignal, kState, kDispatcher } = require_symbols2();
+    var { webidl } = require_webidl();
+    var { URLSerializer } = require_data_url();
+    var { kConstruct } = require_symbols();
+    var assert = require("assert");
+    var { getMaxListeners, setMaxListeners, getEventListeners, defaultMaxListeners } = require("events");
+    var kAbortController = Symbol("abortController");
+    var requestFinalizer = new FinalizationRegistry2(({ signal, abort }) => {
+      signal.removeEventListener("abort", abort);
+    });
+    var dependentControllerMap = /* @__PURE__ */ new WeakMap();
+    function buildAbort(acRef) {
+      return abort;
+      function abort() {
+        const ac = acRef.deref();
+        if (ac !== void 0) {
+          requestFinalizer.unregister(abort);
+          this.removeEventListener("abort", abort);
+          ac.abort(this.reason);
+          const controllerList = dependentControllerMap.get(ac.signal);
+          if (controllerList !== void 0) {
+            if (controllerList.size !== 0) {
+              for (const ref of controllerList) {
+                const ctrl = ref.deref();
+                if (ctrl !== void 0) {
+                  ctrl.abort(this.reason);
+                }
+              }
+              controllerList.clear();
+            }
+            dependentControllerMap.delete(ac.signal);
+          }
+        }
+      }
+      __name(abort, "abort");
+    }
+    __name(buildAbort, "buildAbort");
+    var patchMethodWarning = false;
+    var _Request2 = class _Request2 {
+      // https://fetch.spec.whatwg.org/#dom-request
+      constructor(input, init = {}) {
+        webidl.util.markAsUncloneable(this);
+        if (input === kConstruct) {
+          return;
+        }
+        const prefix = "Request constructor";
+        webidl.argumentLengthCheck(arguments, 1, prefix);
+        input = webidl.converters.RequestInfo(input, prefix, "input");
+        init = webidl.converters.RequestInit(init, prefix, "init");
+        let request = null;
+        let fallbackMode = null;
+        const baseUrl = environmentSettingsObject.settingsObject.baseUrl;
+        let signal = null;
+        if (typeof input === "string") {
+          this[kDispatcher] = init.dispatcher;
+          let parsedURL;
+          try {
+            parsedURL = new URL(input, baseUrl);
+          } catch (err) {
+            throw new TypeError("Failed to parse URL from " + input, { cause: err });
+          }
+          if (parsedURL.username || parsedURL.password) {
+            throw new TypeError(
+              "Request cannot be constructed from a URL that includes credentials: " + input
+            );
+          }
+          request = makeRequest({ urlList: [parsedURL] });
+          fallbackMode = "cors";
+        } else {
+          this[kDispatcher] = init.dispatcher || input[kDispatcher];
+          assert(input instanceof _Request2);
+          request = input[kState];
+          signal = input[kSignal];
+        }
+        const origin = environmentSettingsObject.settingsObject.origin;
+        let window = "client";
+        if (request.window?.constructor?.name === "EnvironmentSettingsObject" && sameOrigin(request.window, origin)) {
+          window = request.window;
+        }
+        if (init.window != null) {
+          throw new TypeError(`'window' option '${window}' must be null`);
+        }
+        if ("window" in init) {
+          window = "no-window";
+        }
+        request = makeRequest({
+          // URL request’s URL.
+          // undici implementation note: this is set as the first item in request's urlList in makeRequest
+          // method request’s method.
+          method: request.method,
+          // header list A copy of request’s header list.
+          // undici implementation note: headersList is cloned in makeRequest
+          headersList: request.headersList,
+          // unsafe-request flag Set.
+          unsafeRequest: request.unsafeRequest,
+          // client This’s relevant settings object.
+          client: environmentSettingsObject.settingsObject,
+          // window window.
+          window,
+          // priority request’s priority.
+          priority: request.priority,
+          // origin request’s origin. The propagation of the origin is only significant for navigation requests
+          // being handled by a service worker. In this scenario a request can have an origin that is different
+          // from the current client.
+          origin: request.origin,
+          // referrer request’s referrer.
+          referrer: request.referrer,
+          // referrer policy request’s referrer policy.
+          referrerPolicy: request.referrerPolicy,
+          // mode request’s mode.
+          mode: request.mode,
+          // credentials mode request’s credentials mode.
+          credentials: request.credentials,
+          // cache mode request’s cache mode.
+          cache: request.cache,
+          // redirect mode request’s redirect mode.
+          redirect: request.redirect,
+          // integrity metadata request’s integrity metadata.
+          integrity: request.integrity,
+          // keepalive request’s keepalive.
+          keepalive: request.keepalive,
+          // reload-navigation flag request’s reload-navigation flag.
+          reloadNavigation: request.reloadNavigation,
+          // history-navigation flag request’s history-navigation flag.
+          historyNavigation: request.historyNavigation,
+          // URL list A clone of request’s URL list.
+          urlList: [...request.urlList]
+        });
+        const initHasKey = Object.keys(init).length !== 0;
+        if (initHasKey) {
+          if (request.mode === "navigate") {
+            request.mode = "same-origin";
+          }
+          request.reloadNavigation = false;
+          request.historyNavigation = false;
+          request.origin = "client";
+          request.referrer = "client";
+          request.referrerPolicy = "";
+          request.url = request.urlList[request.urlList.length - 1];
+          request.urlList = [request.url];
+        }
+        if (init.referrer !== void 0) {
+          const referrer = init.referrer;
+          if (referrer === "") {
+            request.referrer = "no-referrer";
+          } else {
+            let parsedReferrer;
+            try {
+              parsedReferrer = new URL(referrer, baseUrl);
+            } catch (err) {
+              throw new TypeError(`Referrer "${referrer}" is not a valid URL.`, { cause: err });
+            }
+            if (parsedReferrer.protocol === "about:" && parsedReferrer.hostname === "client" || origin && !sameOrigin(parsedReferrer, environmentSettingsObject.settingsObject.baseUrl)) {
+              request.referrer = "client";
+            } else {
+              request.referrer = parsedReferrer;
+            }
+          }
+        }
+        if (init.referrerPolicy !== void 0) {
+          request.referrerPolicy = init.referrerPolicy;
+        }
+        let mode;
+        if (init.mode !== void 0) {
+          mode = init.mode;
+        } else {
+          mode = fallbackMode;
+        }
+        if (mode === "navigate") {
+          throw webidl.errors.exception({
+            header: "Request constructor",
+            message: "invalid request mode navigate."
+          });
+        }
+        if (mode != null) {
+          request.mode = mode;
+        }
+        if (init.credentials !== void 0) {
+          request.credentials = init.credentials;
+        }
+        if (init.cache !== void 0) {
+          request.cache = init.cache;
+        }
+        if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
+          throw new TypeError(
+            "'only-if-cached' can be set only with 'same-origin' mode"
+          );
+        }
+        if (init.redirect !== void 0) {
+          request.redirect = init.redirect;
+        }
+        if (init.integrity != null) {
+          request.integrity = String(init.integrity);
+        }
+        if (init.keepalive !== void 0) {
+          request.keepalive = Boolean(init.keepalive);
+        }
+        if (init.method !== void 0) {
+          let method = init.method;
+          const mayBeNormalized = normalizedMethodRecords[method];
+          if (mayBeNormalized !== void 0) {
+            request.method = mayBeNormalized;
+          } else {
+            if (!isValidHTTPToken(method)) {
+              throw new TypeError(`'${method}' is not a valid HTTP method.`);
+            }
+            const upperCase = method.toUpperCase();
+            if (forbiddenMethodsSet.has(upperCase)) {
+              throw new TypeError(`'${method}' HTTP method is unsupported.`);
+            }
+            method = normalizedMethodRecordsBase[upperCase] ?? method;
+            request.method = method;
+          }
+          if (!patchMethodWarning && request.method === "patch") {
+            define_process_default.emitWarning("Using `patch` is highly likely to result in a `405 Method Not Allowed`. `PATCH` is much more likely to succeed.", {
+              code: "UNDICI-FETCH-patch"
+            });
+            patchMethodWarning = true;
+          }
+        }
+        if (init.signal !== void 0) {
+          signal = init.signal;
+        }
+        this[kState] = request;
+        const ac = new AbortController();
+        this[kSignal] = ac.signal;
+        if (signal != null) {
+          if (!signal || typeof signal.aborted !== "boolean" || typeof signal.addEventListener !== "function") {
+            throw new TypeError(
+              "Failed to construct 'Request': member signal is not of type AbortSignal."
+            );
+          }
+          if (signal.aborted) {
+            ac.abort(signal.reason);
+          } else {
+            this[kAbortController] = ac;
+            const acRef = new WeakRef(ac);
+            const abort = buildAbort(acRef);
+            try {
+              if (typeof getMaxListeners === "function" && getMaxListeners(signal) === defaultMaxListeners) {
+                setMaxListeners(1500, signal);
+              } else if (getEventListeners(signal, "abort").length >= defaultMaxListeners) {
+                setMaxListeners(1500, signal);
+              }
+            } catch {
+            }
+            util.addAbortListener(signal, abort);
+            requestFinalizer.register(ac, { signal, abort }, abort);
+          }
+        }
+        this[kHeaders] = new Headers2(kConstruct);
+        setHeadersList(this[kHeaders], request.headersList);
+        setHeadersGuard(this[kHeaders], "request");
+        if (mode === "no-cors") {
+          if (!corsSafeListedMethodsSet.has(request.method)) {
+            throw new TypeError(
+              `'${request.method} is unsupported in no-cors mode.`
+            );
+          }
+          setHeadersGuard(this[kHeaders], "request-no-cors");
+        }
+        if (initHasKey) {
+          const headersList = getHeadersList(this[kHeaders]);
+          const headers = init.headers !== void 0 ? init.headers : new HeadersList(headersList);
+          headersList.clear();
+          if (headers instanceof HeadersList) {
+            for (const { name, value } of headers.rawValues()) {
+              headersList.append(name, value, false);
+            }
+            headersList.cookies = headers.cookies;
+          } else {
+            fillHeaders(this[kHeaders], headers);
+          }
+        }
+        const inputBody = input instanceof _Request2 ? input[kState].body : null;
+        if ((init.body != null || inputBody != null) && (request.method === "GET" || request.method === "HEAD")) {
+          throw new TypeError("Request with GET/HEAD method cannot have body.");
+        }
+        let initBody = null;
+        if (init.body != null) {
+          const [extractedBody, contentType] = extractBody(
+            init.body,
+            request.keepalive
+          );
+          initBody = extractedBody;
+          if (contentType && !getHeadersList(this[kHeaders]).contains("content-type", true)) {
+            this[kHeaders].append("content-type", contentType);
+          }
+        }
+        const inputOrInitBody = initBody ?? inputBody;
+        if (inputOrInitBody != null && inputOrInitBody.source == null) {
+          if (initBody != null && init.duplex == null) {
+            throw new TypeError("RequestInit: duplex option is required when sending a body.");
+          }
+          if (request.mode !== "same-origin" && request.mode !== "cors") {
+            throw new TypeError(
+              'If request is made from ReadableStream, mode should be "same-origin" or "cors"'
+            );
+          }
+          request.useCORSPreflightFlag = true;
+        }
+        let finalBody = inputOrInitBody;
+        if (initBody == null && inputBody != null) {
+          if (bodyUnusable(input)) {
+            throw new TypeError(
+              "Cannot construct a Request with a Request object that has already been used."
+            );
+          }
+          const identityTransform = new TransformStream();
+          inputBody.stream.pipeThrough(identityTransform);
+          finalBody = {
+            source: inputBody.source,
+            length: inputBody.length,
+            stream: identityTransform.readable
+          };
+        }
+        this[kState].body = finalBody;
+      }
+      // Returns request’s HTTP method, which is "GET" by default.
+      get method() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].method;
+      }
+      // Returns the URL of request as a string.
+      get url() {
+        webidl.brandCheck(this, _Request2);
+        return URLSerializer(this[kState].url);
+      }
+      // Returns a Headers object consisting of the headers associated with request.
+      // Note that headers added in the network layer by the user agent will not
+      // be accounted for in this object, e.g., the "Host" header.
+      get headers() {
+        webidl.brandCheck(this, _Request2);
+        return this[kHeaders];
+      }
+      // Returns the kind of resource requested by request, e.g., "document"
+      // or "script".
+      get destination() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].destination;
+      }
+      // Returns the referrer of request. Its value can be a same-origin URL if
+      // explicitly set in init, the empty string to indicate no referrer, and
+      // "about:client" when defaulting to the global’s default. This is used
+      // during fetching to determine the value of the `Referer` header of the
+      // request being made.
+      get referrer() {
+        webidl.brandCheck(this, _Request2);
+        if (this[kState].referrer === "no-referrer") {
+          return "";
+        }
+        if (this[kState].referrer === "client") {
+          return "about:client";
+        }
+        return this[kState].referrer.toString();
+      }
+      // Returns the referrer policy associated with request.
+      // This is used during fetching to compute the value of the request’s
+      // referrer.
+      get referrerPolicy() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].referrerPolicy;
+      }
+      // Returns the mode associated with request, which is a string indicating
+      // whether the request will use CORS, or will be restricted to same-origin
+      // URLs.
+      get mode() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].mode;
+      }
+      // Returns the credentials mode associated with request,
+      // which is a string indicating whether credentials will be sent with the
+      // request always, never, or only when sent to a same-origin URL.
+      get credentials() {
+        return this[kState].credentials;
+      }
+      // Returns the cache mode associated with request,
+      // which is a string indicating how the request will
+      // interact with the browser’s cache when fetching.
+      get cache() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].cache;
+      }
+      // Returns the redirect mode associated with request,
+      // which is a string indicating how redirects for the
+      // request will be handled during fetching. A request
+      // will follow redirects by default.
+      get redirect() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].redirect;
+      }
+      // Returns request’s subresource integrity metadata, which is a
+      // cryptographic hash of the resource being fetched. Its value
+      // consists of multiple hashes separated by whitespace. [SRI]
+      get integrity() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].integrity;
+      }
+      // Returns a boolean indicating whether or not request can outlive the
+      // global in which it was created.
+      get keepalive() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].keepalive;
+      }
+      // Returns a boolean indicating whether or not request is for a reload
+      // navigation.
+      get isReloadNavigation() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].reloadNavigation;
+      }
+      // Returns a boolean indicating whether or not request is for a history
+      // navigation (a.k.a. back-forward navigation).
+      get isHistoryNavigation() {
+        webidl.brandCheck(this, _Request2);
+        return this[kState].historyNavigation;
+      }
+      // Returns the signal associated with request, which is an AbortSignal
+      // o

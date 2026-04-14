@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn } = require("child_process");
 const path = require("path");
@@ -15,12 +15,42 @@ const isDev = process.argv.includes("--dev") || !app.isPackaged;
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+function sendUpdateStatus(status) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("updater:status", status);
+  }
+}
+
+ipcMain.handle("app:get-version", () => app.getVersion());
+
+ipcMain.handle("updater:check", async () => {
+  if (isDev) {
+    return { ok: false, error: "Auto-update disabled in development mode" };
+  }
+  try {
+    sendUpdateStatus({ state: "checking" });
+    const result = await autoUpdater.checkForUpdates();
+    if (!result) {
+      return { ok: false, error: "No update info returned" };
+    }
+    return {
+      ok: true,
+      currentVersion: app.getVersion(),
+      latestVersion: result.updateInfo.version,
+    };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
 autoUpdater.on("checking-for-update", () => {
   console.log("[updater] Checking for updates...");
+  sendUpdateStatus({ state: "checking" });
 });
 
 autoUpdater.on("update-available", (info) => {
   console.log("[updater] Update available:", info.version);
+  sendUpdateStatus({ state: "available", version: info.version });
   const win = mainWindow || splashWindow;
   if (win && !win.isDestroyed()) {
     dialog.showMessageBox(win, {
@@ -35,6 +65,7 @@ autoUpdater.on("update-available", (info) => {
 autoUpdater.on("download-progress", (progress) => {
   const pct = Math.round(progress.percent);
   console.log(`[updater] Downloading: ${pct}%`);
+  sendUpdateStatus({ state: "downloading", percent: pct });
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(progress.percent / 100);
     mainWindow.setTitle(`PropScope — Downloading update ${pct}%`);
@@ -43,9 +74,10 @@ autoUpdater.on("download-progress", (progress) => {
 
 autoUpdater.on("update-downloaded", (info) => {
   console.log("[updater] Update downloaded:", info.version);
+  sendUpdateStatus({ state: "downloaded", version: info.version });
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(-1);
-    mainWindow.setTitle("PropScope");
+    mainWindow.setTitle(`PropScope v${app.getVersion()}`);
   }
   const win = mainWindow || splashWindow;
   if (!win || win.isDestroyed()) {
@@ -68,15 +100,29 @@ autoUpdater.on("update-downloaded", (info) => {
     .catch(() => {});
 });
 
-autoUpdater.on("update-not-available", () => {
+autoUpdater.on("update-not-available", (info) => {
   console.log("[updater] App is up to date");
+  const ver = (info && info.version) || app.getVersion();
+  sendUpdateStatus({ state: "not-available", version: ver });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const original = `PropScope v${app.getVersion()}`;
+    mainWindow.setTitle(`${original} — up to date (latest: ${ver})`);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(original);
+    }, 5000);
+  }
 });
 
 autoUpdater.on("error", (err) => {
   console.error("[updater] Error:", err.message);
+  sendUpdateStatus({ state: "error", error: err.message });
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(-1);
-    mainWindow.setTitle("PropScope");
+    const original = `PropScope v${app.getVersion()}`;
+    mainWindow.setTitle(`${original} — update check failed`);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(original);
+    }, 5000);
   }
 });
 
@@ -152,13 +198,21 @@ function startNextServer() {
       if (fs.existsSync(envPath)) {
         console.log("[env] Loading", envPath);
         const content = fs.readFileSync(envPath, "utf-8");
-        const regex = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)/gm;
+        // Parse env file supporting multi-line quoted values (e.g. PEM keys)
+        // Matches: KEY="value...possibly multiline..." or KEY='...' or KEY=value
+        const regex = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\r\n]*)/gm;
         let match;
         while ((match = regex.exec(content)) !== null) {
           const key = match[1];
-          let val = match[2].trim();
+          let val = match[2];
           if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
             val = val.slice(1, -1);
+            // Unescape \n in double-quoted values (standard dotenv behavior)
+            if (match[2].startsWith('"')) {
+              val = val.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t");
+            }
+          } else {
+            val = val.trim();
           }
           env[key] = val;
         }
@@ -302,7 +356,9 @@ function showSplash() {
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
 
-  splashWindow.loadFile(path.join(__dirname, "splash.html"));
+  splashWindow.loadFile(path.join(__dirname, "splash.html"), {
+    query: { v: app.getVersion() },
+  });
   splashWindow.center();
 }
 
@@ -313,12 +369,13 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    title: "PropScope",
+    title: `PropScope v${app.getVersion()}`,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 

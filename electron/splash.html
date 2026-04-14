@@ -35,6 +35,12 @@
       font-size: 13px;
       margin-bottom: 20px;
     }
+    .version {
+      color: #5a5a7a;
+      font-size: 11px;
+      margin-top: 16px;
+      letter-spacing: 0.5px;
+    }
     .loader {
       width: 36px;
       height: 36px;
@@ -52,6 +58,12 @@
     <h1>PropScope</h1>
     <p class="sub">Loading&hellip;</p>
     <div class="loader"></div>
+    <p class="version" id="version"></p>
   </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const v = params.get("v");
+    if (v) document.getElementById("version").textContent = "v" + v;
+  </script>
 </body>
 </html>

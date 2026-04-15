@@ -15,6 +15,20 @@ const isDev = process.argv.includes("--dev") || !app.isPackaged;
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+// Resolves when the update check concludes: no update, error, or downloaded.
+// Used to gate main window creation so login is blocked while updating.
+let resolveUpdateGate;
+const updateGate = new Promise((r) => { resolveUpdateGate = r; });
+function releaseUpdateGate() {
+  if (resolveUpdateGate) { resolveUpdateGate(); resolveUpdateGate = null; }
+}
+
+function setSplashStatus(text, percent) {
+  if (!splashWindow || splashWindow.isDestroyed()) return;
+  const js = `window.__setStatus && window.__setStatus(${JSON.stringify(text)}, ${typeof percent === "number" ? percent : "null"});`;
+  splashWindow.webContents.executeJavaScript(js).catch(() => {});
+}
+
 function sendUpdateStatus(status) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("updater:status", status);
@@ -46,26 +60,20 @@ ipcMain.handle("updater:check", async () => {
 autoUpdater.on("checking-for-update", () => {
   console.log("[updater] Checking for updates...");
   sendUpdateStatus({ state: "checking" });
+  setSplashStatus("Checking for updates…");
 });
 
 autoUpdater.on("update-available", (info) => {
   console.log("[updater] Update available:", info.version);
   sendUpdateStatus({ state: "available", version: info.version });
-  const win = mainWindow || splashWindow;
-  if (win && !win.isDestroyed()) {
-    dialog.showMessageBox(win, {
-      type: "info",
-      title: "Update Available",
-      message: `Version ${info.version} is downloading in the background.`,
-      buttons: ["OK"],
-    }).catch(() => {});
-  }
+  setSplashStatus(`Downloading update v${info.version}…`, 0);
 });
 
 autoUpdater.on("download-progress", (progress) => {
   const pct = Math.round(progress.percent);
   console.log(`[updater] Downloading: ${pct}%`);
   sendUpdateStatus({ state: "downloading", percent: pct });
+  setSplashStatus(`Downloading update… ${pct}%`, pct);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(progress.percent / 100);
     mainWindow.setTitle(`PropScope — Downloading update ${pct}%`);
@@ -75,17 +83,17 @@ autoUpdater.on("download-progress", (progress) => {
 autoUpdater.on("update-downloaded", (info) => {
   console.log("[updater] Update downloaded:", info.version);
   sendUpdateStatus({ state: "downloaded", version: info.version });
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setProgressBar(-1);
-    mainWindow.setTitle(`PropScope v${app.getVersion()}`);
-  }
-  const win = mainWindow || splashWindow;
-  if (!win || win.isDestroyed()) {
-    autoUpdater.quitAndInstall();
+  setSplashStatus(`Installing v${info.version}…`);
+  // If the main window hasn't opened yet, install immediately —
+  // the user is still on the splash screen, so no login to interrupt.
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    setTimeout(() => autoUpdater.quitAndInstall(), 400);
     return;
   }
+  mainWindow.setProgressBar(-1);
+  mainWindow.setTitle(`PropScope v${app.getVersion()}`);
   dialog
-    .showMessageBox(win, {
+    .showMessageBox(mainWindow, {
       type: "info",
       title: "Update Ready",
       message: `Version ${info.version} is ready to install. Restart now?`,
@@ -104,6 +112,7 @@ autoUpdater.on("update-not-available", (info) => {
   console.log("[updater] App is up to date");
   const ver = (info && info.version) || app.getVersion();
   sendUpdateStatus({ state: "not-available", version: ver });
+  releaseUpdateGate();
   if (mainWindow && !mainWindow.isDestroyed()) {
     const original = `PropScope v${app.getVersion()}`;
     mainWindow.setTitle(`${original} — up to date (latest: ${ver})`);
@@ -116,6 +125,7 @@ autoUpdater.on("update-not-available", (info) => {
 autoUpdater.on("error", (err) => {
   console.error("[updater] Error:", err.message);
   sendUpdateStatus({ state: "error", error: err.message });
+  releaseUpdateGate();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.setProgressBar(-1);
     const original = `PropScope v${app.getVersion()}`;
@@ -381,6 +391,16 @@ function createWindow() {
 
   mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
 
+  // F12 or Ctrl+Shift+I toggles DevTools (works in packaged builds).
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    if (input.type !== "keyDown") return;
+    const isF12 = input.key === "F12";
+    const isCtrlShiftI = input.control && input.shift && input.key.toLowerCase() === "i";
+    if (isF12 || isCtrlShiftI) {
+      mainWindow.webContents.toggleDevTools();
+    }
+  });
+
   let shown = false;
   function showMainWindow() {
     if (shown) return;
@@ -420,13 +440,33 @@ function killServer() {
 app.whenReady().then(async () => {
   try {
     showSplash();
+
+    if (isDev) {
+      releaseUpdateGate();
+    } else {
+      // Kick off the update check in parallel with the server boot.
+      // If the network is slow or offline, don't block startup forever.
+      setSplashStatus("Checking for updates…");
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.error("[updater] check failed:", err && err.message);
+        releaseUpdateGate();
+      });
+      setTimeout(() => {
+        console.log("[updater] gate timeout — proceeding without update");
+        releaseUpdateGate();
+      }, 15000);
+    }
+
     await startNextServer();
     await waitForPort(PORT);
-    createWindow();
 
-    if (!isDev) {
-      autoUpdater.checkForUpdatesAndNotify();
-    }
+    // Wait for updater to conclude before showing the login window.
+    // If an update downloads, quitAndInstall fires and the app restarts —
+    // the gate intentionally never resolves in that case.
+    setSplashStatus("Starting PropScope…");
+    await updateGate;
+
+    createWindow();
   } catch (err) {
     killServer();
     dialog.showErrorBox("Startup Error", `Failed to start: ${err.message}`);

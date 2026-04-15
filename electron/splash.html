@@ -6,6 +6,7 @@
   <title>PropScope</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { overflow: hidden; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       display: flex;
@@ -34,6 +35,22 @@
       color: #8888aa;
       font-size: 13px;
       margin-bottom: 20px;
+      min-height: 18px;
+    }
+    .bar-wrap {
+      width: 220px;
+      height: 6px;
+      background: #2a2a4a;
+      border-radius: 3px;
+      margin: 14px auto 0;
+      overflow: hidden;
+      display: none;
+    }
+    .bar {
+      height: 100%;
+      width: 0%;
+      background: #6c63ff;
+      transition: width 0.2s ease;
     }
     .version {
       color: #5a5a7a;
@@ -56,14 +73,27 @@
 <body>
   <div class="card">
     <h1>PropScope</h1>
-    <p class="sub">Loading&hellip;</p>
+    <p class="sub" id="status">Loading&hellip;</p>
     <div class="loader"></div>
+    <div class="bar-wrap" id="barWrap"><div class="bar" id="bar"></div></div>
     <p class="version" id="version"></p>
   </div>
   <script>
     const params = new URLSearchParams(location.search);
     const v = params.get("v");
     if (v) document.getElementById("version").textContent = "v" + v;
+    window.__setStatus = function (text, percent) {
+      const s = document.getElementById("status");
+      const wrap = document.getElementById("barWrap");
+      const bar = document.getElementById("bar");
+      if (text != null) s.textContent = text;
+      if (typeof percent === "number") {
+        wrap.style.display = "block";
+        bar.style.width = Math.max(0, Math.min(100, percent)) + "%";
+      } else {
+        wrap.style.display = "none";
+      }
+    };
   </script>
 </body>
 </html>

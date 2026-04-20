@@ -27,6 +27,57 @@ BOROUGH_TO_COURT = {
     "queens": "41", "staten island": "43", "richmond": "43",
 }
 
+NAME_SUFFIXES = {"JR", "SR", "II", "III", "IV", "ESQ"}
+
+
+def build_name_variants(owner, primary_first, primary_last):
+    """
+    For names with 3+ parts (e.g. "Irma Curtis Duprey"), the surrogate court
+    file may list only a subset (e.g. "Irma Duprey"). Return (first, last)
+    tuples to try when the primary split misses.
+    """
+    variants = []
+    seen = {(primary_first.strip().upper(), primary_last.strip().upper())}
+
+    def add(f, l):
+        f, l = (f or "").strip(), (l or "").strip()
+        if not l:
+            return
+        key = (f.upper(), l.upper())
+        if key in seen:
+            return
+        seen.add(key)
+        variants.append((f, l))
+
+    if "," in owner:
+        # "DUPREY, IRMA CURTIS" → last chunk + first chunk
+        last_chunk, _, first_chunk = owner.partition(",")
+        last_chunk = last_chunk.strip()
+        first_words = [w for w in first_chunk.strip().split()
+                       if len(w) > 1 and w.upper() not in NAME_SUFFIXES]
+        if len(first_words) >= 2:
+            # try full first+middle together
+            add(" ".join(first_words), last_chunk)
+            # try each individual first-name word (middle could be the real first)
+            for fw in first_words:
+                add(fw, last_chunk)
+    else:
+        all_words = owner.strip().split()
+        words = [w for w in all_words
+                 if len(w) > 1 and w.upper() not in NAME_SUFFIXES]
+        n = len(words)
+        if n >= 3:
+            # "Irma Curtis Duprey"
+            add(" ".join(words[:-1]), words[-1])        # "Irma Curtis" / "Duprey"
+            add(words[0], " ".join(words[1:]))          # "Irma" / "Curtis Duprey"
+            add(words[1], words[-1])                    # "Curtis" / "Duprey"
+            add(words[0], words[1])                     # "Irma" / "Curtis"
+            if n >= 4:
+                mid = n // 2
+                add(" ".join(words[:mid]), " ".join(words[mid:]))
+
+    return variants
+
 API_BASE = os.environ.get("PORTAL_URL", "http://localhost:3000")
 AUTH_COOKIE = os.environ.get("AUTH_COOKIE", "")
 
@@ -351,10 +402,26 @@ def main():
             try:
                 result = search_estate(sb, s["courtId"], s["lastName"], s.get("firstName", ""))
 
-                # If no results and name had no comma, try swapping first/last
+                # Try alternate splits for multi-part names (e.g. "Irma Curtis Duprey")
+                if not result.get("found") and is_browser_alive(sb):
+                    variants = build_name_variants(
+                        s.get("owner", ""), s.get("firstName", ""), s["lastName"]
+                    )
+                    for vf, vl in variants:
+                        if not is_browser_alive(sb):
+                            break
+                        print(f"trying '{vf} {vl}'...", end=" ", flush=True)
+                        alt = search_estate(sb, s["courtId"], vl, vf)
+                        if alt.get("found"):
+                            result = alt
+                            break
+
+                # Last resort: swap first and last
                 if not result.get("found") and s.get("firstName") and is_browser_alive(sb):
-                    print("retrying swapped...", end=" ", flush=True)
-                    result = search_estate(sb, s["courtId"], s["firstName"], s["lastName"])
+                    print("swapped...", end=" ", flush=True)
+                    alt = search_estate(sb, s["courtId"], s["firstName"], s["lastName"])
+                    if alt.get("found"):
+                        result = alt
 
                 status = "YES" if result.get("found") else "NO"
                 file_nums = "; ".join(result.get("fileNumbers", [])[:5])

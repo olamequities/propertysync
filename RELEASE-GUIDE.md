@@ -93,21 +93,25 @@ Installers output to `dist-electron/`.
    - Windows: `PropScope Setup 1.1.0.exe`
    - Mac: `PropScope-1.1.0.dmg`
 3. Install like any normal app
-4. Place `.env.local` file next to the installed exe (or in the app resources folder)
+4. On first launch, PropScope asks for its configuration file — select the `.env` you sent them
 
-### The `.env.local` File
+### The `.env` File
 
-The client needs this file with the credentials. Create it for them:
+The installers are public, so **credentials are never bundled** — send the client this file privately (not by email in plain text if you can avoid it):
 
 ```
 AUTH_USERNAME=their_username
 AUTH_PASSWORD=their_password
 JWT_SECRET=some_random_secret
-GOOGLE_SERVICE_ACCOUNT_EMAIL=bank-servicer-data@dazzling-galaxy-447320-h4.iam.gserviceaccount.com
-GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
+GOOGLE_SERVICE_ACCOUNT_EMAIL=service-account@project.iam.gserviceaccount.com
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 GOOGLE_SHEETS_SPREADSHEET_ID=their_sheet_id
 GOOGLE_SHEETS_SHEET_NAME=Sheet1
 ```
+
+The app copies it to `%APPDATA%\PropScope\.env` (Mac: `~/Library/Application Support/PropScope/.env`), which survives updates.
+
+**Updating credentials** (e.g. after rotating the key): put the new `.env` next to `PropScope.exe` in the install folder and restart the app — a newer file there is imported automatically. Or delete the `.env` in the app data folder and the app will ask for the file again.
 
 ### Requirements for Estate Scanner
 

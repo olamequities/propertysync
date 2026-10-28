@@ -136,6 +136,75 @@ autoUpdater.on("error", (err) => {
   }
 });
 
+// ─── Config (.env) ──────────────────────────────────────────
+// Credentials are never bundled in the installer. They live in the per-user
+// data folder, which survives updates. To roll out new credentials, place a
+// newer .env next to the exe (or in resources) and restart — it gets imported.
+const REQUIRED_KEYS = ["AUTH_USERNAME", "AUTH_PASSWORD", "JWT_SECRET", "GOOGLE_SERVICE_ACCOUNT_EMAIL", "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY", "GOOGLE_SHEETS_SPREADSHEET_ID"];
+
+function configFilePath() {
+  return path.join(app.getPath("userData"), ".env");
+}
+
+function missingConfigKeys(file) {
+  const content = fs.readFileSync(file, "utf-8");
+  return REQUIRED_KEYS.filter((k) => !new RegExp(`^${k}\\s*=\\s*\\S`, "m").test(content));
+}
+
+function importConfig(src) {
+  fs.mkdirSync(path.dirname(configFilePath()), { recursive: true });
+  fs.copyFileSync(src, configFilePath());
+  console.log("[env] Imported config from", src);
+}
+
+async function ensureConfigFile() {
+  const dest = configFilePath();
+  const destTime = fs.existsSync(dest) ? fs.statSync(dest).mtimeMs : 0;
+
+  // Import a dropped-in (or legacy bundled) .env if it's newer than the current config
+  const candidates = [
+    path.join(path.dirname(process.execPath), ".env"),
+    path.join(path.dirname(process.execPath), ".env.local"),
+    path.join(process.resourcesPath, ".env"),
+    path.join(process.resourcesPath, ".env.local"),
+  ];
+  for (const src of candidates) {
+    if (fs.existsSync(src) && fs.statSync(src).mtimeMs > destTime && missingConfigKeys(src).length === 0) {
+      importConfig(src);
+      return;
+    }
+  }
+  if (destTime) return;
+
+  // First run: ask the user for the .env file they were given
+  for (;;) {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      title: "PropScope setup",
+      message: "PropScope needs its configuration file.",
+      detail: "Select the .env file you were sent. You only need to do this once.",
+      buttons: ["Select file…", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) throw new Error("PropScope can't start without its configuration file.");
+
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: "Select PropScope configuration (.env)",
+      properties: ["openFile", "showHiddenFiles"],
+    });
+    if (canceled || !filePaths[0]) continue;
+
+    const missing = missingConfigKeys(filePaths[0]);
+    if (missing.length) {
+      await dialog.showMessageBox({ type: "error", title: "Invalid configuration", message: "That file is missing required settings:", detail: missing.join("\n") });
+      continue;
+    }
+    importConfig(filePaths[0]);
+    return;
+  }
+}
+
 // ─── Next.js Server ─────────────────────────────────────────
 function findNextServer() {
   if (isDev) return null;
@@ -195,12 +264,9 @@ function startNextServer() {
       HOSTNAME: "127.0.0.1",
     };
 
-    // Load env file from resources, next to exe, or project root
+    // Load env file from the per-user config (see ensureConfigFile), or project root
     const envPaths = [
-      path.join(process.resourcesPath, ".env"),
-      path.join(process.resourcesPath, ".env.local"),
-      path.join(path.dirname(process.execPath), ".env"),
-      path.join(path.dirname(process.execPath), ".env.local"),
+      configFilePath(),
       path.join(process.cwd(), ".env"),
       path.join(process.cwd(), ".env.local"),
     ];
@@ -236,22 +302,6 @@ function startNextServer() {
     const serverDir = path.dirname(serverPath);
     console.log("[next] Starting server from:", serverPath);
     console.log("[next] CWD:", serverDir);
-
-    // Copy .env.local next to server.js so Next.js reads it natively
-    for (const envPath of envPaths) {
-      if (fs.existsSync(envPath)) {
-        const destEnv = path.join(serverDir, ".env.local");
-        if (!fs.existsSync(destEnv)) {
-          try {
-            fs.copyFileSync(envPath, destEnv);
-            console.log("[env] Copied .env.local to", destEnv);
-          } catch (e) {
-            console.error("[env] Failed to copy .env.local:", e.message);
-          }
-        }
-        break;
-      }
-    }
 
     // Copy .next/static and public into the server directory if needed
     const staticSrc = path.join(process.resourcesPath, "app", ".next", "static");
@@ -439,6 +489,7 @@ function killServer() {
 // ─── App lifecycle ──────────────────────────────────────────
 app.whenReady().then(async () => {
   try {
+    if (!isDev) await ensureConfigFile();
     showSplash();
 
     if (isDev) {

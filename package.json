@@ -1,6 +1,6 @@
 {
   "name": "olam-app",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "NYC property owner lookup, reverse mortgage lead detection, and estate search",
   "author": "Olam Equities",
   "private": true,
@@ -55,14 +55,16 @@
         "from": ".next/standalone",
         "to": "app",
         "filter": [
-          "**/*"
+          "**/*",
+          "!**/.env*"
         ]
       },
       {
         "from": ".next/standalone/node_modules",
         "to": "app/node_modules",
         "filter": [
-          "**/*"
+          "**/*",
+          "!**/.env*"
         ]
       },
       {
@@ -85,10 +87,6 @@
         "filter": [
           "estate-scanner*"
         ]
-      },
-      {
-        "from": ".env",
-        "to": ".env"
       }
     ],
     "publish": {

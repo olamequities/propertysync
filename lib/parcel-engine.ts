@@ -1,7 +1,7 @@
 import { readAllRows, writeParcelResult, writeBlockLot } from "./google-sheets";
 import { searchACRIS } from "./acris-opendata";
 import { analyzeDocuments } from "./acris-scraper";
-import { NYCPropertyScraper } from "./scraper";
+import { assertAddressColumnsMatch, lookupProperty, resolveBoroughCode } from "./property-lookup";
 import type { ParcelProgress } from "./types";
 
 /** In-memory job store — attached to globalThis to survive Next.js dev hot reloads */
@@ -87,11 +87,6 @@ export interface ParcelScanOptions {
   sheetName?: string;
 }
 
-const BOROUGH_MAP: Record<string, string> = {
-  manhattan: "1", bronx: "2", brooklyn: "3", queens: "4", "staten island": "5",
-  "1": "1", "2": "2", "3": "3", "4": "4", "5": "5",
-};
-
 /** Start a background parcel scan. Returns immediately with the jobId. */
 export function startParcelScan(options: ParcelScanOptions = {}): string {
   if (getActiveParcelId()) throw new Error("A parcel scan is already running");
@@ -152,15 +147,15 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
     progress.currentAddress = address;
 
     try {
-      const boroughCode = BOROUGH_MAP[row.borough.toLowerCase().trim()] || defaultBorough;
+      assertAddressColumnsMatch(row.fullAddress, row.houseNumber, row.street);
+      const boroughCode = resolveBoroughCode(row.borough, defaultBorough);
       let { block, lot } = row;
 
       // Look up block/lot from NYC property site if missing
       if (!block || !lot) {
         console.log(`[parcel] Block/lot missing for ${address}, looking up via scraper...`);
-        const scraper = new NYCPropertyScraper(signal);
         const street = row.street.replace(/\s*#\s*\d+.*$/, "");
-        const data = await scraper.getPropertyDataByAddress(row.houseNumber, street, boroughCode);
+        const data = await lookupProperty(row.houseNumber, street, boroughCode, signal);
         if (data.block && data.lot) {
           block = data.block;
           lot = data.lot;

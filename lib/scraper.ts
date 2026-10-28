@@ -261,10 +261,10 @@ export class NYCPropertyScraper {
     if (iMatch) this.idx = parseInt(iMatch[1]);
   }
 
-  private async followSearchResults(resp: {
-    text: string;
-    url: string;
-  }): Promise<{ text: string; url: string }> {
+  private async followSearchResults(
+    resp: { text: string; url: string },
+    houseNumber?: string
+  ): Promise<{ text: string; url: string }> {
     if (resp.url.toLowerCase().includes("datalet.aspx")) {
       this.captureSearchIndex(resp.url);
       return resp;
@@ -282,7 +282,20 @@ export class NYCPropertyScraper {
     // Search result rows with onclick
     const resultRows = $("tr[class*='SearchResults']");
     if (resultRows.length) {
-      const onclick = resultRows.first().attr("onclick") ?? "";
+      // House number search is a prefix match ("19" also returns 190, 195, 199...) —
+      // pick the row whose address (last cell) has exactly this house number
+      let row = resultRows.first();
+      if (houseNumber) {
+        const exact = resultRows.filter((_, el) => {
+          const address = $(el).find("td").last().text().trim();
+          return houseNumberMatches(extractHouseNumber(address), houseNumber);
+        });
+        if (!exact.length) {
+          throw new Error(`No exact match for house number ${houseNumber} (${resultRows.length} similar addresses found)`);
+        }
+        row = exact.first();
+      }
+      const onclick = row.attr("onclick") ?? "";
       const urlMatch = onclick.match(/selectSearchRow\('([^']+)'\)/);
       if (urlMatch) {
         let href = urlMatch[1];
@@ -339,6 +352,33 @@ export class NYCPropertyScraper {
     }
 
     const postResp = await this.fetchPost(searchUrl, formData);
+    return this.followSearchResults(postResp, houseNumber);
+  }
+
+  /** Search by Borough/Block/Lot — identifies exactly one property */
+  async searchByBBL(
+    borough: string,
+    block: string,
+    lot: string
+  ): Promise<{ text: string; url: string }> {
+    this.acceptDisclaimer();
+
+    const searchUrl = `${BASE_URL}/search/commonsearch.aspx?mode=persprop`;
+    const resp = await this.fetchGet(searchUrl);
+    const $ = cheerio.load(resp.text);
+
+    const formData: Record<string, string> = {
+      ...getAllHiddenFields($),
+      ...getAspTokens($),
+      inpParid: borough, // Borough
+      inpTag: block,     // Block
+      inpStat: lot,      // Lot
+      inpVind: "",       // Easement
+      btSearch: "Search",
+      hdAction: "search",
+    };
+
+    const postResp = await this.fetchPost(searchUrl, formData);
     return this.followSearchResults(postResp);
   }
 
@@ -361,6 +401,40 @@ export class NYCPropertyScraper {
   ): Promise<PropertyData> {
     await this.searchByAddress(houseNumber, street, borough);
     const resp = await this.getAssessmentDatalet();
+    const data = parsePropertyData(resp.text);
+    // A single prefix match skips the results list — make sure it's the same house
+    if (!data.address || !houseNumberMatches(extractHouseNumber(data.address), houseNumber)) {
+      throw new Error(`No exact match for house number ${houseNumber} (closest: ${data.address ?? "none"})`);
+    }
+    return data;
+  }
+
+  async getPropertyDataByBBL(
+    borough: string,
+    block: string,
+    lot: string
+  ): Promise<PropertyData> {
+    await this.searchByBBL(borough, block, lot);
+    const resp = await this.getAssessmentDatalet();
     return parsePropertyData(resp.text);
   }
+}
+
+/** "1895 A PACIFIC STREET" → "1895 A", "100 -14 202 STREET" → "100 -14", "19 JEFFERSON AVENUE" → "19" */
+export function extractHouseNumber(address: string): string {
+  const m = address.toUpperCase().match(/^(\d+(?:\s*-\s*\d+)?(?:\s+[A-Z](?=\s))?)\s/);
+  return m ? m[1] : "";
+}
+
+/** Exact house number match ("188 -22" = "18822", "1895 A" = "1895A"), or within a range like "228-230" */
+export function houseNumberMatches(found: string, wanted: string): boolean {
+  const norm = (s: string) => s.toUpperCase().replace(/[^0-9A-Z]/g, "");
+  if (!found) return false;
+  if (norm(found) === norm(wanted)) return true;
+
+  // Ranges have a larger second part on the same side of the street — unlike Queens "188-22"
+  const range = found.match(/^(\d+)\s*-\s*(\d+)$/);
+  if (!range || !/^\d+$/.test(wanted.trim())) return false;
+  const [lo, hi, n] = [parseInt(range[1], 10), parseInt(range[2], 10), parseInt(wanted, 10)];
+  return hi > lo && hi - lo <= 20 && n >= lo && n <= hi && (n - lo) % 2 === 0;
 }

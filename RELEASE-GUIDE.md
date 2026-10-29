@@ -40,18 +40,19 @@ Railway picks it up and redeploys. Done.
    "version": "1.2.0"
    ```
 
-2. **Commit and tag**:
+2. **Commit and push** (this also redeploys Railway):
    ```bash
    git add -A
    git commit -m "v1.2.0 - description of changes"
-   git tag v1.2.0
-   git push && git push --tags
+   git push
    ```
 
-3. **GitHub Actions builds automatically**:
-   - Windows `.exe` installer builds on `windows-latest`
-   - Mac `.dmg` installer builds on `macos-latest`
-   - Both are uploaded to GitHub Releases
+3. **Build and test locally** (see "Building Locally" below), then publish the release — the asset names must use dashes to match `latest.yml`:
+   ```bash
+   gh release create v1.2.0 --target main --title "1.2.0" --notes "..." \
+     PropScope-Setup-1.2.0.exe PropScope-Setup-1.2.0.exe.blockmap dist-electron/latest.yml
+   ```
+   (copy `dist-electron/PropScope Setup 1.2.0.exe` and its `.blockmap` to the dashed names first). The GitHub Actions workflow is manual-only and creates a draft.
 
 4. **Client gets the update**:
    - On next app launch, it checks for updates
@@ -93,25 +94,15 @@ Installers output to `dist-electron/`.
    - Windows: `PropScope Setup 1.1.0.exe`
    - Mac: `PropScope-1.1.0.dmg`
 3. Install like any normal app
-4. On first launch, PropScope asks for its configuration file — select the `.env` you sent them
+4. Log in with the usual PropScope username and password (needs internet the first time)
 
-### The `.env` File
+### Credentials
 
-The installers are public, so **credentials are never bundled** — send the client this file privately (not by email in plain text if you can avoid it):
+The installer is public, so it contains **no credentials**. When a client logs in, the desktop app checks the username/password against the Railway server (`/api/desktop-config`), which returns the shared settings (Google service account, sheet ID, scraper settings). The app caches them, plus the login, in `%APPDATA%\olam-app\.env` (Mac: `~/Library/Application Support/olam-app/.env`) so it also works offline. The session-signing secret (`JWT_SECRET`) is generated per machine.
 
-```
-AUTH_USERNAME=their_username
-AUTH_PASSWORD=their_password
-JWT_SECRET=some_random_secret
-GOOGLE_SERVICE_ACCOUNT_EMAIL=service-account@project.iam.gserviceaccount.com
-GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
-GOOGLE_SHEETS_SPREADSHEET_ID=their_sheet_id
-GOOGLE_SHEETS_SHEET_NAME=Sheet1
-```
+Railway's environment variables are therefore the single source of truth.
 
-The app copies it to `%APPDATA%\olam-app\.env` (Mac: `~/Library/Application Support/olam-app/.env`), which survives updates.
-
-**Updating credentials** (e.g. after rotating the key): put the new `.env` next to `PropScope.exe` in the install folder and restart the app — a newer file there is imported automatically. Or delete the `.env` in the app data folder and the app will ask for the file again.
+**Rotating credentials**: change the variables on Railway. Desktop apps pick up the new values at their next login (sessions last 24h). A new `AUTH_PASSWORD` simply means clients log in with the new password.
 
 ### Requirements for Estate Scanner
 

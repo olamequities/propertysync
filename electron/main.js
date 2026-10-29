@@ -4,6 +4,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const net = require("net");
 const fs = require("fs");
+const crypto = require("crypto");
 
 let mainWindow;
 let splashWindow;
@@ -137,72 +138,24 @@ autoUpdater.on("error", (err) => {
 });
 
 // ─── Config (.env) ──────────────────────────────────────────
-// Credentials are never bundled in the installer. They live in the per-user
-// data folder, which survives updates. To roll out new credentials, place a
-// newer .env next to the exe (or in resources) and restart — it gets imported.
-const REQUIRED_KEYS = ["AUTH_USERNAME", "AUTH_PASSWORD", "JWT_SECRET", "GOOGLE_SERVICE_ACCOUNT_EMAIL", "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY", "GOOGLE_SHEETS_SPREADSHEET_ID"];
+// The installer ships no credentials. When the user logs in, the local server
+// verifies the login against the Railway server and receives the shared
+// settings (lib/desktop-config.ts), cached here in the per-user data folder,
+// which survives updates.
+const REMOTE_CONFIG_URL = "https://propertysync-production.up.railway.app";
 
 function configFilePath() {
   return path.join(app.getPath("userData"), ".env");
 }
 
-function missingConfigKeys(file) {
-  const content = fs.readFileSync(file, "utf-8");
-  return REQUIRED_KEYS.filter((k) => !new RegExp(`^${k}\\s*=\\s*\\S`, "m").test(content));
-}
-
-function importConfig(src) {
-  fs.mkdirSync(path.dirname(configFilePath()), { recursive: true });
-  fs.copyFileSync(src, configFilePath());
-  console.log("[env] Imported config from", src);
-}
-
-async function ensureConfigFile() {
-  const dest = configFilePath();
-  const destTime = fs.existsSync(dest) ? fs.statSync(dest).mtimeMs : 0;
-
-  // Import a dropped-in (or legacy bundled) .env if it's newer than the current config
-  const candidates = [
-    path.join(path.dirname(process.execPath), ".env"),
-    path.join(path.dirname(process.execPath), ".env.local"),
-    path.join(process.resourcesPath, ".env"),
-    path.join(process.resourcesPath, ".env.local"),
-  ];
-  for (const src of candidates) {
-    if (fs.existsSync(src) && fs.statSync(src).mtimeMs > destTime && missingConfigKeys(src).length === 0) {
-      importConfig(src);
-      return;
-    }
-  }
-  if (destTime) return;
-
-  // First run: ask the user for the .env file they were given
-  for (;;) {
-    const { response } = await dialog.showMessageBox({
-      type: "info",
-      title: "PropScope setup",
-      message: "PropScope needs its configuration file.",
-      detail: "Select the .env file you were sent. You only need to do this once.",
-      buttons: ["Select file…", "Quit"],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (response !== 0) throw new Error("PropScope can't start without its configuration file.");
-
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: "Select PropScope configuration (.env)",
-      properties: ["openFile", "showHiddenFiles"],
-    });
-    if (canceled || !filePaths[0]) continue;
-
-    const missing = missingConfigKeys(filePaths[0]);
-    if (missing.length) {
-      await dialog.showMessageBox({ type: "error", title: "Invalid configuration", message: "That file is missing required settings:", detail: missing.join("\n") });
-      continue;
-    }
-    importConfig(filePaths[0]);
-    return;
-  }
+// The config always needs a session-signing secret; it's local to this machine.
+function ensureConfigFile() {
+  const file = configFilePath();
+  const content = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
+  if (/^JWT_SECRET\s*=\s*\S/m.test(content)) return;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const prefix = content && !content.endsWith("\n") ? content + "\n" : content;
+  fs.writeFileSync(file, `${prefix}JWT_SECRET="${crypto.randomBytes(32).toString("hex")}"\n`, { mode: 0o600 });
 }
 
 // ─── Next.js Server ─────────────────────────────────────────
@@ -297,6 +250,10 @@ function startNextServer() {
         ).join(", "));
         break;
       }
+    }
+    if (!isDev) {
+      env.DESKTOP_REMOTE_CONFIG_URL = REMOTE_CONFIG_URL;
+      env.DESKTOP_CONFIG_FILE = configFilePath();
     }
 
     const serverDir = path.dirname(serverPath);
@@ -489,7 +446,7 @@ function killServer() {
 // ─── App lifecycle ──────────────────────────────────────────
 app.whenReady().then(async () => {
   try {
-    if (!isDev) await ensureConfigFile();
+    if (!isDev) ensureConfigFile();
     showSplash();
 
     if (isDev) {

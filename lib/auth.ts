@@ -36,6 +36,8 @@ export async function getSession(): Promise<boolean> {
 
 export function validateCredentials(username: string, password: string): boolean {
   return (
+    !!process.env.AUTH_USERNAME &&
+    !!process.env.AUTH_PASSWORD &&
     username === process.env.AUTH_USERNAME &&
     password === process.env.AUTH_PASSWORD
   );

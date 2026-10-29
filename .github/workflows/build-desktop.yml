@@ -1,9 +1,9 @@
 name: Build Desktop App
 
+# Releases are built and tested locally, then published (see RELEASE-GUIDE.md).
+# Manual runs only — publishes a draft release.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build-windows:

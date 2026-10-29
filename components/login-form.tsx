@@ -21,7 +21,8 @@ export default function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       });
 
       if (!res.ok) {
-        setError("Invalid credentials");
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Invalid credentials");
         return;
       }
 

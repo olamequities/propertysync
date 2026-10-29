@@ -109,7 +109,7 @@ GOOGLE_SHEETS_SPREADSHEET_ID=their_sheet_id
 GOOGLE_SHEETS_SHEET_NAME=Sheet1
 ```
 
-The app copies it to `%APPDATA%\PropScope\.env` (Mac: `~/Library/Application Support/olam-app/.env`), which survives updates.
+The app copies it to `%APPDATA%\olam-app\.env` (Mac: `~/Library/Application Support/olam-app/.env`), which survives updates.
 
 **Updating credentials** (e.g. after rotating the key): put the new `.env` next to `PropScope.exe` in the install folder and restart the app — a newer file there is imported automatically. Or delete the `.env` in the app data folder and the app will ask for the file again.
 

@@ -12,15 +12,40 @@ const PARTIES = "636b-3b5g";
 // Optional app token for higher rate limits (1000 req/hr without, unlimited with)
 const APP_TOKEN = process.env.NYC_OPENDATA_APP_TOKEN || "";
 
+/** NYC Open Data is down or overloaded (5xx, 429, timeout, network) — worth retrying later */
+export class SodaUnavailableError extends Error {}
+
+const SODA_TIMEOUT_MS = 60_000;
+const SODA_RETRY_DELAYS_MS = [5_000, 15_000, 45_000];
+
 async function sodaFetch(dataset: string, params: string, limit = 500, signal?: AbortSignal): Promise<any[]> {
   const tokenParam = APP_TOKEN ? `&$$app_token=${APP_TOKEN}` : "";
   const url = `${SODA_BASE}/${dataset}.json?${params}&$limit=${limit}${tokenParam}`;
-  const resp = await fetch(url, { signal });
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`SODA API ${resp.status}: ${body}`);
+
+  for (let attempt = 0; ; attempt++) {
+    let error: Error;
+    try {
+      const timeout = AbortSignal.timeout(SODA_TIMEOUT_MS);
+      const resp = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      if (resp.ok) return resp.json();
+      const body = (await resp.text()).slice(0, 200);
+      if (resp.status !== 429 && resp.status < 500) throw new Error(`SODA API ${resp.status}: ${body}`);
+      error = new SodaUnavailableError(`NYC Open Data unavailable (HTTP ${resp.status})`);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (!(err instanceof Error) || err.message.startsWith("SODA API")) throw err;
+      error = err instanceof SodaUnavailableError
+        ? err
+        : new SodaUnavailableError(`NYC Open Data unavailable (${err.name === "TimeoutError" ? "timed out" : err.message})`);
+    }
+
+    if (attempt >= SODA_RETRY_DELAYS_MS.length) throw error;
+    console.warn(`[acris-opendata] ${error.message} — retrying in ${SODA_RETRY_DELAYS_MS[attempt] / 1000}s`);
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(resolve, SODA_RETRY_DELAYS_MS[attempt]);
+      signal?.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+    });
   }
-  return resp.json();
 }
 
 // Re-export ACRISDocument so callers don't need to import from acris-scraper

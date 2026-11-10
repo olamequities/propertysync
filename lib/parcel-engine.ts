@@ -1,5 +1,5 @@
 import { readAllRows, writeParcelResult, writeBlockLot } from "./google-sheets";
-import { searchACRIS } from "./acris-opendata";
+import { searchACRIS, SodaUnavailableError } from "./acris-opendata";
 import { analyzeDocuments } from "./acris-scraper";
 import { assertAddressColumnsMatch, lookupProperty, resolveBoroughCode } from "./property-lookup";
 import type { ParcelProgress } from "./types";
@@ -134,10 +134,14 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
   const allRows = await readAllRows(options.sheetName);
   console.log(`[parcel] Read ${allRows.length} rows from sheet`);
 
-  // Filter to rows that have no parcelStatus and have enough address info
-  const pendingRows = allRows.filter((r) => !r.parcelStatus && (r.houseNumber && r.street));
+  // Filter to rows that have no parcelStatus (or failed only because NYC Open Data was down) and have enough address info
+  const outageError = (r: { parcelStatus: string; parcelDetails: string }) =>
+    r.parcelStatus === "ERROR" && /^SODA API (5\d\d|429)|^NYC Open Data unavailable/.test(r.parcelDetails);
+  const pendingRows = allRows.filter((r) => (!r.parcelStatus || outageError(r)) && (r.houseNumber && r.street));
   progress.total = pendingRows.length;
   console.log(`[parcel] Found ${pendingRows.length} rows to scan`);
+
+  let consecutiveOutages = 0;
 
   for (const row of pendingRows) {
     await waitIfPaused(progress.jobId);
@@ -191,6 +195,7 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
       const parcelDetails = analysis.reasons.join(" | ");
 
       await writeParcelResult(row.rowIndex, parcelStatus, parcelDetails, options.sheetName);
+      consecutiveOutages = 0;
       progress.succeeded++;
       progress.lastCompletedRow = {
         rowIndex: row.rowIndex,
@@ -204,16 +209,25 @@ async function runParcelScan(progress: ParcelProgress, signal: AbortSignal, opti
       progress.errors.push({ row: row.rowIndex, address, error: msg });
       progress.failed++;
 
-      // Write ERROR status to sheet so it doesn't get retried
-      try {
-        await writeParcelResult(row.rowIndex, "ERROR", msg, options.sheetName);
-        progress.lastCompletedRow = {
-          rowIndex: row.rowIndex,
-          parcelStatus: "ERROR",
-          parcelDetails: msg,
-        };
-      } catch {
-        // ignore write failure
+      if (err instanceof SodaUnavailableError) {
+        // Leave the row blank so the next scan picks it up; stop hammering a service that's down
+        if (++consecutiveOutages >= 3) {
+          progress.errors.push({ row: row.rowIndex, address, error: "NYC Open Data is not responding — scan paused. Click Resume to try again later." });
+          pauseParcelJob(progress.jobId);
+          consecutiveOutages = 0;
+        }
+      } else {
+        // Write ERROR status to sheet so it doesn't get retried
+        try {
+          await writeParcelResult(row.rowIndex, "ERROR", msg, options.sheetName);
+          progress.lastCompletedRow = {
+            rowIndex: row.rowIndex,
+            parcelStatus: "ERROR",
+            parcelDetails: msg,
+          };
+        } catch {
+          // ignore write failure
+        }
       }
     }
 
